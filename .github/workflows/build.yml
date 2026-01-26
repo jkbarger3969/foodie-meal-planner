@@ -53,7 +53,7 @@ jobs:
         run: npm run build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # For Mac code signing (Optional: add these to your repo secrets later)
+          CSC_IDENTITY_AUTO_DISCOVERY: false
           # APPLE_ID: ${{ secrets.APPLE_ID }}
           # APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           # CSC_LINK: ${{ secrets.CSC_LINK }}
