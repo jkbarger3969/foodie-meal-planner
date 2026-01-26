@@ -1,6 +1,8 @@
 {
   "name": "foodie-meal-planner-desktop",
   "version": "1.0.0",
+  "description": "A powerful desktop meal planner and recipe manager.",
+  "author": "Keith Barger",
   "private": true,
   "main": "src/main/main.js",
   "scripts": {
@@ -61,15 +63,12 @@
     "win": {
       "target": [
         "nsis"
-      ],
-      "icon": "build/icon.ico"
+      ]
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico"
+      "createDesktopShortcut": true
     },
     "directories": {
       "buildResources": "build",
