@@ -35,7 +35,7 @@ jobs:
 
       - name: Install Python Dependencies
         run: |
-          pip install setuptools distutils-r
+          pip install setuptools
 
       - name: Install Dependencies
         run: npm install
