@@ -25,8 +25,17 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 22
           cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11' 
+
+      - name: Install Python Dependencies
+        run: |
+          pip install setuptools distutils-r
 
       - name: Install Dependencies
         run: npm install
