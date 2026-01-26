@@ -1,0 +1,14 @@
+{
+  "name": "foodie-meal-planner-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/main/main.js",
+  "dependencies": {
+    "better-sqlite3": "^11.5.0",
+    "electron-store": "^9.0.0",
+    "googleapis": "^126.0.1",
+    "puppeteer": "^24.35.0",
+    "ws": "^8.19.0"
+  },
+  "productName": "Foodie Meal Planner"
+}

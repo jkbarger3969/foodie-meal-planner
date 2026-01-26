@@ -1,0 +1,82 @@
+{
+  "name": "foodie-meal-planner-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/main/main.js",
+  "scripts": {
+    "dev": "electron .",
+    "import": "electron scripts/run-import.js",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "postinstall": "electron-builder install-app-deps",
+    "build": "electron-builder"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "bonjour-service": "^1.3.0",
+    "dotenv": "^17.2.3",
+    "electron-store": "^9.0.0",
+    "googleapis": "^126.0.1",
+    "puppeteer": "^24.35.0",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.2",
+    "electron": "^40.0.0",
+    "electron-builder": "^26.4.0",
+    "electron-rebuild": "^3.2.9"
+  },
+  "productName": "Foodie Meal Planner",
+  "build": {
+    "appId": "com.foodie.mealplanner",
+    "productName": "Foodie Meal Planner",
+    "files": [
+      "src/**/*",
+      "data/foodie.sqlite",
+      "data/images/**/*",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/puppeteer/**/*",
+      "data/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.lifestyle",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "title": "Foodie Meal Planner ${version}",
+      "icon": "build/icon.icns",
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
+    },
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    }
+  }
+}

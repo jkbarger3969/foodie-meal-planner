@@ -1,0 +1,21 @@
+
+> foodie-meal-planner-desktop@1.0.0 build
+> electron-builder
+
+  • electron-builder  version=24.13.3 os=25.2.0
+  • loaded configuration  file=package.json ("build" field)
+  • description is missed in the package.json  appPackageFile=/Users/keithbarger/Projects/foodie-meal-planner-desktop/package.json
+  • author is missed in the package.json  appPackageFile=/Users/keithbarger/Projects/foodie-meal-planner-desktop/package.json
+  • @electron/rebuild not required if you use electron-builder, please consider to remove excess dependency from devDependencies
+
+To ensure your native dependencies are always matched electron version, simply add script `"postinstall": "electron-builder install-app-deps" to your `package.json`
+  • rebuilding native dependencies  dependencies=better-sqlite3@11.10.0 platform=darwin arch=arm64
+  • install prebuilt binary  name=better-sqlite3 version=11.10.0 platform=darwin arch=arm64 napi=
+  • packaging       platform=darwin arch=arm64 electron=28.3.3 appOutDir=dist/mac-arm64
+  • signing         file=dist/mac-arm64/Foodie Meal Planner.app platform=darwin type=distribution identity=04AEF155DC670D5D8A8C23AB29710D5B8BCDDF31 provisioningProfile=none
+  • skipped macOS notarization  reason=`notarize` options were unable to be generated
+  • building        target=DMG arch=arm64 file=dist/Foodie Meal Planner-1.0.0-arm64.dmg
+  • building        target=macOS zip arch=arm64 file=dist/Foodie Meal Planner-1.0.0-arm64-mac.zip
+  • Detected arm64 process, HFS+ is unavailable. Creating dmg with APFS - supports Mac OSX 10.12+
+  • building block map  blockMapFile=dist/Foodie Meal Planner-1.0.0-arm64.dmg.blockmap
+  • building block map  blockMapFile=dist/Foodie Meal Planner-1.0.0-arm64-mac.zip.blockmap

@@ -1,0 +1,2313 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description"
+    content="Foodie Meal Planner - Organize your recipes, plan your meals, and manage your pantry with ease." />
+  <meta property="og:title" content="Foodie Meal Planner" />
+  <meta property="og:description" content="Effortless meal planning and recipe organization for the modern kitchen." />
+  <meta property="og:type" content="website" />
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/ai-chef.css">
+</head>
+
+<body>
+  <!-- Toast Notification Container -->
+  <div id="toast-container"></div>
+
+  <!-- Recipe Context Menu (Phase 2.1) -->
+  <div id="recipe-context-menu" class="context-menu">
+    <button class="context-menu-item" data-action="view">
+      <span>👁️</span>
+      <span>View Recipe</span>
+    </button>
+    <button class="context-menu-item" data-action="edit">
+      <span>✏️</span>
+      <span>Edit Recipe</span>
+    </button>
+    <button class="context-menu-item" data-action="assign">
+      <span>📅</span>
+      <span>Assign to Date...</span>
+    </button>
+    <button class="context-menu-item" data-action="add-to-collection">
+      <span>📦</span>
+      <span>Add to Collection</span>
+    </button>
+    <button class="context-menu-item" data-action="duplicate">
+      <span>📋</span>
+      <span>Duplicate Recipe</span>
+    </button>
+    <div class="context-menu-separator"></div>
+    <button class="context-menu-item" data-action="print">
+      <span>🖨️</span>
+      <span>Print</span>
+    </button>
+    <div class="context-menu-separator"></div>
+    <button class="context-menu-item danger" data-action="delete">
+      <span>🗑️</span>
+      <span>Delete</span>
+    </button>
+  </div>
+
+  <!-- Grid Meal Context Menu (for Planner grid view) -->
+  <div id="grid-meal-context-menu" class="context-menu">
+    <div id="grid-meal-context-header"
+      style="padding:8px 12px;font-weight:600;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line);margin-bottom:4px;">
+    </div>
+    <div id="grid-meal-context-items"></div>
+  </div>
+
+  <header>
+    <div style="margin-bottom: 12px;">
+      <h1 style="margin: 0 0 4px 0;">Foodie Meal Planner</h1>
+      <div class="muted">Local desktop app (Planner + Bulk Planner + Recipes + Shopping List + Pantry + Admin) • SQLite
+        + Apple Calendar</div>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px; flex-wrap:nowrap;">
+      <div class="tabs" id="tabs">
+        <div class="tab active" data-tab="home">🏠 Home</div>
+        <div class="tab" data-tab="planner">📋 Planner</div>
+        <div class="tab" data-tab="recipes">📚 Recipes</div>
+        <div class="tab" data-tab="collections">📦 Collections</div>
+        <div class="tab" data-tab="shop">🛒 Shop</div>
+        <div class="tab" data-tab="pantry">🥫 Pantry</div>
+        <div class="tab" data-tab="admin">⚙️ Admin</div>
+      </div>
+      <div style="width:1px; height:24px; background:var(--line); margin:0 4px; flex-shrink:0;"></div>
+      <button id="recentActionsFloatBtn" class="ghost"
+        style="padding:6px 10px; font-size:14px; flex-shrink:0;">🕐</button>
+      <button id="companionFloatBtn" class="ghost" style="padding:6px 10px; font-size:14px; flex-shrink:0;">📱</button>
+      <button id="contextualHelpBtn" class="ghost" style="padding:6px 10px; font-size:14px; flex-shrink:0;">❓</button>
+      <button id="btnStartTour" class="ghost" style="padding:6px 10px; font-size:14px; flex-shrink:0;">🎯</button>
+      <div class="user-switcher" style="flex-shrink:0;">
+        <button id="btnUserSwitcher" class="user-switcher-btn" style="padding:6px 10px; font-size:12px;">
+          <span id="activeUserAvatar">👨‍👩‍👧‍👦</span>
+          <span id="activeUserName">Family</span>
+          <span class="user-switcher-arrow">▼</span>
+        </button>
+        <div id="userSwitcherDropdown" class="user-switcher-dropdown" style="display:none;">
+          <div class="user-switcher-header">
+            <span>Switch User</span>
+            <button class="ghost mini" onclick="closeUserSwitcher()">✕</button>
+          </div>
+          <div id="userSwitcherList" class="user-switcher-list"></div>
+          <div class="user-switcher-footer">
+            <button class="ghost mini" onclick="openManageUsersModal()" style="width:100%;">⚙️ Manage Users</button>
+          </div>
+        </div>
+      </div>
+      <button id="btnThemeToggle" class="ghost" style="padding:6px 10px; font-size:16px; flex-shrink:0;">🌓</button>
+    </div>
+  </header>
+
+  <!-- PHASE 8.1: Tour Overlay -->
+  <div id="tourOverlay" class="tour-overlay" style="display:none;">
+    <div class="tour-spotlight" id="tourSpotlight"></div>
+    <div class="tour-card" id="tourCard">
+      <div class="tour-card-header">
+        <h2 id="tourTitle">Welcome to Foodie</h2>
+        <button class="tour-close-btn" onclick="skipTour()" title="Close tour">✕</button>
+      </div>
+      <div class="tour-card-body">
+        <p id="tourDescription">Let's take a quick tour of the app!</p>
+        <div class="tour-step-counter">
+          <span id="tourStepIndicator">Step 1 of 7</span>
+        </div>
+      </div>
+      <div class="tour-card-footer">
+        <button id="btnTourPrevious" class="ghost mini" onclick="previousTourStep()" disabled>← Previous</button>
+        <div style="flex:1;"></div>
+        <button class="ghost mini" onclick="skipTour()">Skip Tour</button>
+        <button id="btnTourNext" class="primary mini" onclick="nextTourStep()">Next →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contextual help button now in header -->
+
+  <!-- ==================== HOME DASHBOARD ==================== -->
+  <section id="tab-home" class="wrap view-section active-view" style="display:block;">
+    <!-- Welcome Header -->
+    <div style="margin-bottom: 24px;">
+      <h2 id="dashboardWelcome" style="margin:0; font-size:24px;">Good Morning, Family</h2>
+      <div class="muted">Here's what's happening today</div>
+    </div>
+
+    <div class="dashboard-grid">
+      <!-- Left Column: Primary Actions -->
+      <div class="dashboard-main">
+
+        <!-- Dinner Tonight Hero Card -->
+        <div id="dashboardDinnerCard" class="card dashboard-hero">
+          <div class="hero-content">
+            <div class="hero-label">🍽️ Dinner Tonight</div>
+            <h2 id="dashboardDinnerTitle" class="hero-title">Loading...</h2>
+            <div id="dashboardDinnerMeta" class="hero-meta"></div>
+            <div class="hero-actions">
+              <button id="btnDashCookNow" class="primary big">👨‍🍳 Cook Now</button>
+              <button id="btnDashViewRecipe" class="ghost">View Recipe</button>
+            </div>
+          </div>
+          <div id="dashboardDinnerImage" class="hero-image"></div>
+        </div>
+
+        <!-- Quick Stats Row -->
+        <div class="dashboard-stats-row">
+          <div class="stat-card" onclick="document.querySelector('[data-tab=shop]').click()">
+            <div class="stat-icon">🛒</div>
+            <div class="stat-info">
+              <div class="stat-value" id="dashShopCount">0</div>
+              <div class="stat-label">Items to Buy</div>
+            </div>
+          </div>
+          <div class="stat-card" onclick="document.querySelector('[data-tab=pantry]').click()">
+            <div class="stat-icon">⚠️</div>
+            <div class="stat-info">
+              <div class="stat-value" id="dashLowStockCount">0</div>
+              <div class="stat-label">Low Stock</div>
+            </div>
+          </div>
+          <div class="stat-card" onclick="document.querySelector('[data-tab=recipes]').click()">
+            <div class="stat-icon">📚</div>
+            <div class="stat-info">
+              <div class="stat-value" id="dashRecipeCount">0</div>
+              <div class="stat-label">Total Recipes</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right Column: Quick Actions & Tips -->
+      <div class="dashboard-sidebar">
+
+        <div class="card">
+          <h2>🚀 Quick Actions</h2>
+          <div class="list">
+            <button class="ghost" onclick="document.querySelector('[data-tab=planner]').click()">📅 Plan This
+              Week</button>
+            <button class="ghost"
+              onclick="document.querySelector('[data-tab=recipes]').click(); document.getElementById('btnImportRecipe').click()">🌐
+              Import Recipe</button>
+            <button class="ghost"
+              onclick="document.querySelector('[data-tab=pantry]').click(); setTimeout(() => document.getElementById('btnPantryAdd')?.click(), 100)">🥫
+              Add to Pantry</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 20px;">
+          <h2>💡 Did You Know?</h2>
+          <p class="muted" style="line-height:1.6;">You can drag and drop recipes directly onto the calendar to plan
+            your meals instantly.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- PHASE 8.2+: Keyboard Shortcuts Modal -->
+  <div class="modalBack" id="keyboardShortcutsModal" style="z-index: 120;">
+    <div class="modal" style="max-width: 700px;">
+      <div class="modalHead">
+        <div>
+          <div style="font-weight:700;">⌨️ Keyboard Shortcuts</div>
+          <div class="muted">Speed up your workflow with these shortcuts</div>
+        </div>
+        <button class="ghost" onclick="closeKeyboardShortcutsModal()">Close</button>
+      </div>
+
+      <div class="hr"></div>
+
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:20px;">
+        <!-- General Navigation -->
+        <div>
+          <h3 style="font-size:14px; font-weight:700; margin:0 0 12px 0; color:var(--accent);">General Navigation</h3>
+          <div class="shortcut-list">
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>Cmd</kbd> + <kbd>1-6</kbd></span>
+              <span class="shortcut-desc">Switch between tabs</span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>Esc</kbd></span>
+              <span class="shortcut-desc">Close modals/dialogs</span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>?</kbd></span>
+              <span class="shortcut-desc">Show this shortcuts list</span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>Cmd</kbd> + <kbd>K</kbd></span>
+              <span class="shortcut-desc">Open command palette</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recipe Management -->
+        <div>
+          <h3 style="font-size:14px; font-weight:700; margin:0 0 12px 0; color:var(--accent);">Recipe Management</h3>
+          <div class="shortcut-list">
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>Cmd</kbd> + <kbd>N</kbd></span>
+              <span class="shortcut-desc">New recipe (Recipes tab)</span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>Cmd</kbd> + <kbd>S</kbd></span>
+              <span class="shortcut-desc">Save current recipe</span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>Cmd</kbd> + <kbd>F</kbd></span>
+              <span class="shortcut-desc">Focus search box</span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>Cmd</kbd> + <kbd>E</kbd></span>
+              <span class="shortcut-desc">Edit selected recipe</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Meal Planning -->
+        <div>
+          <h3 style="font-size:14px; font-weight:700; margin:0 0 12px 0; color:var(--accent);">Meal Planning</h3>
+          <div class="shortcut-list">
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>Cmd</kbd> + <kbd>P</kbd></span>
+              <span class="shortcut-desc">Print meal plan</span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>Cmd</kbd> + <kbd>G</kbd></span>
+              <span class="shortcut-desc">Generate shopping list</span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>Tab</kbd></span>
+              <span class="shortcut-desc">Navigate form fields</span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>Enter</kbd></span>
+              <span class="shortcut-desc">Submit/confirm</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Advanced -->
+        <div>
+          <h3 style="font-size:14px; font-weight:700; margin:0 0 12px 0; color:var(--accent);">Advanced</h3>
+          <div class="shortcut-list">
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>Cmd</kbd> + <kbd>Z</kbd></span>
+              <span class="shortcut-desc">Undo last action</span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd></span>
+              <span class="shortcut-desc">Redo action</span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>Cmd</kbd> + <kbd>,</kbd></span>
+              <span class="shortcut-desc">Open preferences</span>
+            </div>
+            <div class="shortcut-item">
+              <span class="shortcut-keys"><kbd>Cmd</kbd> + <kbd>R</kbd></span>
+              <span class="shortcut-desc">Refresh data</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="help-text">
+        <strong>Tip:</strong> Many buttons have tooltips - hover over them to see what they do!
+      </div>
+    </div>
+  </div>
+
+  <!-- PLANNER -->
+  <section id="tab-planner" class="grid">
+    <div class="card">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">Planner</h2>
+      <div class="muted">Set meals per day. Pick/replace and clear meals. (Uses plans/{YYYY-MM-DD})</div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-4">
+          <label>Start date</label>
+          <input type="date" id="planStart">
+        </div>
+        <div class="col-4">
+          <label>End date</label>
+          <input type="date" id="planEnd">
+          <input type="number" id="planDays" min="1" max="60" value="1" style="display:none;">
+        </div>
+        <div class="col-4">
+          <label>Actions</label>
+          <div class="actions">
+            <button class="ghost" id="btnPlanCollapseAll">Collapse all</button>
+            <button class="ghost" id="btnPlanExpandAll">Expand all</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <!-- View Toggle -->
+      <div style="display:flex; gap:8px; margin-bottom:12px;">
+        <button class="ghost" id="btnPlanViewList">📋 List View</button>
+        <button class="ghost" id="btnPlanViewGrid" style="border-color:rgba(77,163,255,0.55);">📅 Grid View</button>
+      </div>
+
+      <!-- List View -->
+      <div id="planList" class="list" style="display:none;"></div>
+
+      <!-- Grid View -->
+      <div id="planGrid"></div>
+    </div>
+
+    <!-- Bulk Meal Operations -->
+    <div class="card">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">Bulk Meal Operations</h2>
+      <div class="muted">Quick operations for managing multiple meals at once.</div>
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-12">
+          <label>Copy Week</label>
+          <div class="actions">
+            <button class="ghost" id="btnCopyWeekForward" title="Copy this week's meals to next week">Copy This Week
+              →
+              Next Week</button>
+            <button class="ghost" id="btnCopyWeekBack" title="Copy this week's meals to previous week">Copy This
+              Week
+              → Previous Week</button>
+            <span class="muted" id="copyWeekStatus"></span>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <label>Auto-Fill Breakfast</label>
+          <div class="actions" style="align-items:flex-start;">
+            <div style="position:relative; width:300px;">
+              <input type="text" id="autoFillBreakfastSearch" placeholder="Search breakfast recipes..."
+                style="width:100%; padding:8px; box-sizing:border-box;">
+              <div id="autoFillBreakfastDropdown"
+                style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--card); border:1px solid var(--line); border-radius:8px; max-height:200px; overflow-y:auto; z-index:10; margin-top:4px;">
+              </div>
+              <input type="hidden" id="autoFillBreakfastRecipe">
+            </div>
+            <button class="ghost" id="btnAutoFillBreakfast">Auto-Fill Empty Breakfasts</button>
+            <span class="muted" id="autoFillStatus"></span>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <label>Meal Pattern Templates</label>
+          <div class="actions">
+            <button class="ghost" id="btnSaveMealPattern">Save Current Week as Template</button>
+            <button class="ghost" id="btnLoadMealPattern">Load Template</button>
+            <span class="muted" id="templateStatus"></span>
+          </div>
+        </div>
+
+        <!-- PHASE 6.2: Export Meal Plan -->
+        <div class="col-12">
+          <div class="hr"></div>
+          <label>📥 Export Meal Plan</label>
+          <div class="muted" style="margin-bottom:12px;">Export your meal plan for a date range to JSON format</div>
+          <div class="actions">
+            <button class="export-btn" id="btnExportMealPlan">Export Current Date Range</button>
+            <span class="muted" id="exportMealPlanStatus"></span>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <div class="hr"></div>
+          <label>🤖 Smart Weekly Meal Planner</label>
+          <div class="muted" style="margin-bottom:12px;">Automatically generate a balanced week of meals based on
+            your
+            preferences</div>
+
+          <div class="row" style="margin-bottom:12px;">
+            <div class="col-3">
+              <label>Start Date</label>
+              <input type="date" id="genStartDate">
+            </div>
+            <div class="col-3">
+              <label>End Date</label>
+              <input type="date" id="genEndDate">
+            </div>
+            <div class="col-6">
+              <label>Actions</label>
+              <div class="actions">
+                <button class="primary" id="btnGenerateWeek"
+                  style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">✨ Generate This
+                  Week</button>
+                <button class="ghost" id="btnMealPlannerSettings">⚙️ Preferences</button>
+                <span class="muted" id="generateWeekStatus"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">Calendar Sync</h2>
+      <div class="muted">Sync planned meals to Apple Calendar (macOS). The app will ask for permission the first
+        time.
+      </div>
+      <div class="hr"></div>
+
+      <div class="row align-top">
+        <div class="col-6">
+          <label>Calendar name</label>
+          <input id="calId" value="Foodie Meal Planner">
+          <div class="muted">Enter the Apple Calendar name exactly as it appears in the Calendar app.</div>
+        </div>
+        <div class="col-6">
+          <label>Range</label>
+          <div class="actions">
+            <button class="primary" id="btnCalSync">Sync current range</button>
+          </div>
+          <div class="muted" id="calStatus"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">🌐 Google Calendar Sync (Direct)</h2>
+      <div class="muted">Sync meals directly to Google Calendar - no Apple Calendar needed. Syncs to YOUR Google
+        account from any computer.</div>
+
+      <!-- PHASE 8.2: Inline help text -->
+      <div class="help-text" style="margin-top:12px;">
+        This feature creates calendar events in your Google Calendar for each planned meal. Setup is required only
+        once per computer. After authorization, you can sync any date range with one click.
+      </div>
+
+      <div class="hr"></div>
+
+      <!-- Setup Section -->
+      <div id="googleCalSetup" style="margin-bottom: 20px;">
+        <div style="font-weight: 600; margin-bottom: 12px;">Initial Setup (One-Time)</div>
+
+        <div class="row">
+          <div class="col-6">
+            <label>1. Upload Google Credentials</label>
+            <input type="file" id="googleCredentialsFile" accept=".json" style="margin-bottom: 8px;">
+            <div class="muted">Download from Google Cloud Console (see setup guide)</div>
+            <button class="ghost" id="btnUploadGoogleCreds" style="margin-top: 8px;">Load Credentials File</button>
+          </div>
+          <div class="col-6">
+            <label>Status</label>
+            <div id="googleCredsStatus" class="muted">Not configured</div>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="col-12">
+            <label>2. Authorize Google Account</label>
+            <div class="actions" style="margin-bottom: 8px;">
+              <button class="primary" id="btnGoogleAuthorize" disabled>Open Authorization Page</button>
+              <a id="googleAuthLink" href="#" target="_blank" style="display:none;">Or click here</a>
+            </div>
+            <div class="muted">Sign in with YOUR Google account and grant calendar permissions</div>
+          </div>
+        </div>
+
+        <div class="row" id="googleAuthCodeRow" style="display:none; margin-top: 12px;">
+          <div class="col-8">
+            <label>3. Enter Authorization Code</label>
+            <input type="text" id="googleAuthCode" placeholder="Paste code from Google">
+          </div>
+          <div class="col-4">
+            <label>Submit</label>
+            <button class="primary" id="btnGoogleAuthSubmit">Complete Authorization</button>
+          </div>
+        </div>
+
+        <div id="googleAuthStatus" class="muted" style="margin-top: 8px;"></div>
+      </div>
+
+      <div class="hr"></div>
+
+      <!-- Calendar Selection & Sync -->
+      <div id="googleCalSync">
+        <div style="font-weight: 600; margin-bottom: 12px;">Sync Settings</div>
+
+        <div class="row" style="align-items: flex-end;">
+          <div class="col-2">
+            <label>Start Date</label>
+            <input type="date" id="googleSyncStart">
+          </div>
+          <div class="col-2">
+            <label>End Date</label>
+            <input type="date" id="googleSyncEnd">
+          </div>
+          <div class="col-5">
+            <label>Target Google Calendar</label>
+            <select id="googleCalendarSelect" disabled>
+              <option value="">-- Select calendar --</option>
+              <option value="primary">Primary</option>
+            </select>
+          </div>
+          <div class="col-3">
+            <label>&nbsp;</label>
+            <button class="primary" id="btnGoogleCalSync" disabled
+              style="background: linear-gradient(135deg, #4285f4 0%, #34a853 100%); width: 100%;">🌐 Sync to Google
+              Calendar</button>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top: 12px;">
+          <div class="col-12">
+            <button class="ghost" id="btnListGoogleCals" disabled>Refresh Calendar List</button>
+            <button class="ghost" id="btnCheckDuplicates" disabled style="margin-left: 8px;">🔍 Check for
+              Duplicates</button>
+            <div class="muted" id="googleSyncStatus" style="margin-top: 8px;"></div>
+            <div class="muted" id="googleDuplicateStatus" style="margin-top: 8px;"></div>
+          </div>
+        </div>
+
+        <div class="hr" style="margin-top: 16px;"></div>
+
+        <div class="row">
+          <div class="col-12">
+            <details>
+              <summary style="cursor: pointer; font-weight: 600; margin-bottom: 8px;">Advanced Options</summary>
+              <div style="margin-top: 12px; padding: 12px; background: rgba(255,255,255,0.02); border-radius: 8px;">
+                <button class="danger" id="btnRevokeGoogleCal">Revoke Google Calendar Access</button>
+                <div class="muted" style="margin-top: 8px;">Remove Foodie's access to your Google Calendar. You'll
+                  need to re-authorize to sync again.</div>
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">Clear Meals</h2>
+      <div class="muted">Remove meals from the planner. Use with caution - this action cannot be undone.</div>
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-4">
+          <label>Clear Start Date</label>
+          <input type="date" id="clearStart">
+        </div>
+        <div class="col-4">
+          <label>Clear End Date</label>
+          <input type="date" id="clearEnd">
+        </div>
+        <div class="col-4">
+          <label>Target User</label>
+          <select id="clearUserSelect">
+            <option value="current">Active User Only</option>
+            <option value="all">All Users (Full Wipe)</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <div class="col-12">
+          <label>Actions</label>
+          <div class="actions">
+            <button class="danger" id="btnClearRange">Clear Date Range</button>
+            <button class="danger" id="btnClearAll">Clear All Meals (Full History)</button>
+          </div>
+        </div>
+      </div>
+      <div class="muted" id="clearStatus" style="margin-top:8px;"></div>
+    </div>
+  </section>
+
+  <!-- BULK PLANNER -->
+  <section id="tab-bulk" class="grid" style="display:none;">
+    <div class="card">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">Bulk Planner</h2>
+      <div class="muted">Same data as Planner, but optimized for quick multi-day planning and swapping.</div>
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-4">
+          <label>Start date</label>
+          <input type="date" id="bulkStart">
+        </div>
+        <div class="col-4">
+          <label>End date</label>
+          <input type="date" id="bulkEnd">
+          <input type="number" id="bulkDays" min="1" max="60" value="14" style="display:none;">
+        </div>
+        <div class="col-4">
+          <label>Actions</label>
+          <div class="actions">
+            <button class="primary" id="btnBulkLoad">Load</button>
+            <button class="ghost" id="btnBulkCollapseAll">Collapse all</button>
+            <button class="ghost" id="btnBulkExpandAll">Expand all</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+      <div id="bulkList" class="list"></div>
+    </div>
+  </section>
+
+  <!-- RECIPES -->
+  <section id="tab-recipes" class="grid" style="display:none;">
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+        <h2 style="margin:0; font-size:16px;">Recipe Manager</h2>
+        <div>
+          <span class="pill accent" id="pillCount">Loaded: 0</span>
+          <span class="pill" id="pillMode">Local search</span>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-12">
+          <label>Search recipes (searches the entire collection; not just loaded ones)</label>
+          <input id="recipeSearch" placeholder="Type to search..." />
+          <div style="margin-top:8px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; margin:0;">
+              <input type="checkbox" id="recipeFavoritesOnly" style="cursor:pointer;" />
+              <span style="color:var(--muted); font-size:13px;">Favorites only</span>
+            </label>
+            <select id="recipeCuisineFilter" style="width:auto; padding:6px 10px; min-height:auto;">
+              <option value="">All Cuisines</option>
+            </select>
+
+            <!-- PHASE 2.3: Advanced Filters Toggle -->
+            <button class="toggle-filters-btn" id="toggleAdvancedFilters">
+              <span class="icon">▼</span>
+              <span>Advanced Filters</span>
+              <span class="active-filters-badge" id="activeFiltersBadge" style="display:none;">0</span>
+            </button>
+
+            <div class="muted" id="recipeStatus"></div>
+          </div>
+
+          <!-- PHASE 2.3: Advanced Filters Panel -->
+          <div class="advanced-filters" id="advancedFiltersPanel">
+            <!-- Meal Types Filter -->
+            <div class="filter-section">
+              <div class="filter-section-title">
+                🍽️ Meal Types
+              </div>
+              <div class="filter-chips" id="mealTypeChips">
+                <div class="filter-chip" data-meal-type="Breakfast">Breakfast</div>
+                <div class="filter-chip" data-meal-type="Brunch">Brunch</div>
+                <div class="filter-chip" data-meal-type="Lunch">Lunch</div>
+                <div class="filter-chip" data-meal-type="Dinner">Dinner</div>
+                <div class="filter-chip" data-meal-type="Side Dish">Side Dish</div>
+                <div class="filter-chip" data-meal-type="Appetizer">Appetizer</div>
+                <div class="filter-chip" data-meal-type="Snack">Snack</div>
+                <div class="filter-chip" data-meal-type="Dessert">Dessert</div>
+                <div class="filter-chip" data-meal-type="Beverage">Beverage</div>
+              </div>
+            </div>
+
+            <!-- Ingredients Filter -->
+            <div class="filter-section">
+              <div class="filter-section-title">
+                🥕 Ingredients
+              </div>
+              <div class="ingredient-filter-input">
+                <input type="text" id="mustHaveIngredient" placeholder="Must have (e.g., chicken)" />
+                <button class="ghost" id="addMustHaveIngredient">+ Must Have</button>
+                <input type="text" id="excludeIngredient" placeholder="Exclude (e.g., nuts)" />
+                <button class="ghost" id="addExcludeIngredient">+ Exclude</button>
+              </div>
+              <div class="ingredient-tags" id="ingredientTags"></div>
+            </div>
+
+            <!-- Actions -->
+            <div class="filter-section" style="margin-bottom:0;">
+              <div style="display:flex; gap:10px; justify-content:flex-end;">
+                <button class="clear-filters-btn" id="clearAllFilters">Clear All Filters</button>
+                <button class="primary" id="applyFilters">Apply Filters</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12">
+          <div class="actions">
+            <button class="primary" id="btnAddRecipe">Add Recipe</button>
+            <button class="primary" id="btnQuickAddRecipe"
+              style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);"
+              title="Quick add with minimal fields">⚡ Quick Add</button>
+            <button class="primary" id="btnImportRecipe"
+              style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">🔗 Import from URL</button>
+            <button class="ghost" id="btnRefresh">Reset</button>
+            <select id="jumpLetter" class="mini">
+              <option value="">Jump A–Z</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- PHASE 6.2 + 3.4: Export Controls & Bulk Actions -->
+      <div class="export-controls" id="recipeExportControls">
+        <div class="export-controls-text">
+          <span class="export-controls-count" id="selectedRecipeCount">0</span> recipe(s) selected
+        </div>
+        <button class="ghost mini" id="btnSelectAllRecipes">Select All</button>
+        <button class="ghost mini" id="btnDeselectAllRecipes">Deselect All</button>
+
+        <!-- PHASE 3.4: Bulk Actions -->
+        <button class="ghost mini" id="btnBulkAssign" title="Assign selected recipes to dates">📅 Assign</button>
+        <button class="ghost mini" id="btnBulkCollection" title="Add selected recipes to collection">📦
+          Collection</button>
+        <button class="ghost mini" id="btnBulkEdit" title="Edit common fields">✏️ Edit Fields</button>
+        <button class="danger mini" id="btnBulkDelete" title="Delete selected recipes">🗑️ Delete</button>
+
+        <button class="export-btn" id="btnExportSelectedRecipes">📥 Export</button>
+      </div>
+
+      <div id="recipesList" style="position: relative;"></div>
+    </div>
+
+  </section>
+
+  <!-- RECIPE COLLECTIONS -->
+  <section id="tab-collections" class="grid" style="display:none;">
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap;">
+        <h2 style="margin:0; font-size:16px;">Recipe Collections</h2>
+
+        <!-- PHASE 2.4: View Toggle -->
+        <div style="display:flex; gap:12px; align-items:center;">
+          <div class="view-toggle">
+            <button class="view-toggle-btn active" id="viewCollectionsCard" title="Card view">
+              <span>⊞</span> Cards
+            </button>
+            <button class="view-toggle-btn" id="viewCollectionsList" title="List view">
+              <span>☰</span> List
+            </button>
+          </div>
+          <button class="primary" id="btnCreateCollection">Create Collection</button>
+        </div>
+      </div>
+      <div class="muted">Organize recipes into custom collections (e.g., Quick Weeknight Dinners, Holiday Recipes)
+      </div>
+
+      <!-- PHASE 8.2: Inline help text -->
+      <div class="help-text" style="margin-top:12px;">
+        <strong>Tip:</strong> Create themed collections to plan your week faster. Try "Italian Week", "Budget
+        Meals",
+        or "Batch Cooking Recipes". You can assign an entire collection to your meal plan at once!
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-12">
+          <label>Filter by Collection</label>
+          <select id="collectionFilter" style="margin-bottom:12px;">
+            <option value="">All Recipes</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="collectionsList" class="list"></div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">Recipes in Selected Collection</h2>
+      <div class="muted" id="collectionRecipesSubtitle">Select a collection above to view recipes</div>
+      <div class="hr"></div>
+      <div id="collectionRecipesList" class="list"></div>
+    </div>
+  </section>
+
+  <!-- SHOPPING LIST -->
+  <section id="tab-shop" class="grid" style="display:none;">
+    <div class="card">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">Shopping List</h2>
+      <div class="muted">Generates from planned meals in a date range.</div>
+      <div class="hr"></div>
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <label style="display: flex; align-items: center; gap: 4px;">
+          <span style="font-size: 0.9em;">Start:</span>
+          <input type="date" id="shopStart" style="padding: 6px 8px;">
+        </label>
+        <label style="display: flex; align-items: center; gap: 4px;">
+          <span style="font-size: 0.9em;">End:</span>
+          <input type="date" id="shopEnd" style="padding: 6px 8px;">
+        </label>
+        <button class="primary" id="btnBuildShop" data-tooltip="Generate shopping list from meal plan"
+          data-tooltip-pos="bottom">Generate</button>
+        <button class="ghost" id="btnPrintShopAll" data-tooltip="Print complete list for all stores"
+          data-tooltip-pos="bottom">Print all stores</button>
+        <button class="danger" id="btnClearShop" data-tooltip="Remove all items from shopping list"
+          data-tooltip-pos="bottom">Clear list</button>
+        <label
+          style="display: flex; align-items: center; gap: 4px; margin-left: auto; font-size: 0.85em; cursor: pointer; font-weight: normal;">
+          <input type="checkbox" id="shopIncludeLowStock" style="cursor: pointer; width: 14px; height: 14px;">
+          <span style="color: #666;">Add low-stock pantry items</span>
+        </label>
+      </div>
+
+      <!-- Collection Inclusion Section -->
+      <div class="hr"></div>
+      <div class="item" style="background: rgba(77,163,255,0.08);">
+        <label
+          style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; font-size: 14px; margin-bottom: 0;">
+          <input type="checkbox" id="shopIncludeCollections" style="cursor: pointer; width: 16px; height: 16px;">
+          <span style="color: var(--text);">Include collections in shopping list</span>
+        </label>
+
+        <div id="collectionInclusionOptions" style="display:none; margin-top:16px;">
+          <div style="margin-bottom:12px;">
+            <label style="display:block; margin-bottom:8px; font-size:12px; color: var(--muted);">Select
+              Collections:</label>
+            <select id="shopCollectionSelect" multiple size="4" style="min-height: 100px;">
+              <!-- Populated dynamically -->
+            </select>
+            <div class="muted" style="margin-top:6px;">Hold Cmd/Ctrl to select multiple</div>
+          </div>
+
+          <div style="margin-bottom:12px;">
+            <div style="font-size:13px; font-weight:600; color: var(--text); margin-bottom:8px;">Inclusion Mode:
+            </div>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:8px;">
+              <input type="radio" name="shopCollectionMode" value="independent" checked
+                style="cursor:pointer; width:16px; height:16px;">
+              <span style="font-size:13px; color: var(--text);">Independent (add to shopping list, no date
+                tie)</span>
+            </label>
+            <div class="muted" style="margin-left:24px; margin-bottom:8px;">
+              Collections will be added to the shopping list regardless of planned meals
+            </div>
+          </div>
+
+          <div class="item" style="background:rgba(255,193,7,0.14); border-color: rgba(255,193,7,0.30);">
+            <div class="muted" style="color: var(--text); opacity: 0.9;">
+              <strong>💡 Note:</strong> If collection recipes are already in your date range, ingredients won't be
+              duplicated.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+      <div id="shopOut" class="list"></div>
+    </div>
+  </section>
+
+  <!-- PANTRY -->
+  <section id="tab-pantry" class="grid" style="display:none;">
+    <div class="card">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">Pantry</h2>
+      <div class="muted">Simple pantry tracker (add/edit/remove).</div>
+
+      <!-- PHASE 8.2+: Inline help for pantry system -->
+      <div class="help-text" style="margin-top:12px;">
+        Track your pantry inventory, monitor low stock items, and check expiration dates. When you generate a
+        shopping
+        list, items you already have in your pantry won't be duplicated.
+      </div>
+
+      <div class="hr"></div>
+
+      <!-- PHASE 3.2: Pantry Insights Toggle -->
+      <button class="insights-toggle-btn" id="btnTogglePantryInsights">
+        <span class="insights-toggle-icon">📊</span>
+        <span>Show Pantry Insights</span>
+      </button>
+
+      <!-- PHASE 3.2: Pantry Insights Dashboard -->
+      <div class="pantry-insights" id="pantryInsights">
+        <!-- Status Cards -->
+        <div class="pantry-insights-grid">
+          <div class="insight-card in-stock">
+            <div class="insight-card-header">
+              <div class="insight-card-icon">✅</div>
+              <div class="insight-card-value" id="inStockCount">0</div>
+            </div>
+            <div class="insight-card-label">Items In Stock</div>
+            <button class="insight-card-action" id="btnViewAllPantry">View All Items</button>
+          </div>
+
+          <div class="insight-card low-stock">
+            <div class="insight-card-header">
+              <div class="insight-card-icon">⚠️</div>
+              <div class="insight-card-value" id="lowStockCount">0</div>
+            </div>
+            <div class="insight-card-label">Low Stock Items</div>
+            <button class="insight-card-action" id="btnViewLowStock">View Low Stock</button>
+          </div>
+
+          <div class="insight-card expiring-soon">
+            <div class="insight-card-header">
+              <div class="insight-card-icon">⏰</div>
+              <div class="insight-card-value" id="expiringSoonCount">0</div>
+            </div>
+            <div class="insight-card-label">Expiring Soon (7 days)</div>
+            <button class="insight-card-action" id="btnViewExpiring">View Expiring Items</button>
+          </div>
+        </div>
+
+        <!-- Category Breakdown -->
+        <div class="category-breakdown">
+          <div class="category-breakdown-title">📦 Items by Category</div>
+          <div class="category-list" id="categoryBreakdownList">
+            <div class="muted">Loading...</div>
+          </div>
+        </div>
+
+        <!-- Low Stock Details (Expandable) -->
+        <details class="category-breakdown" id="lowStockDetails" style="display:none;">
+          <summary style="cursor:pointer; font-size:14px; font-weight:600; margin-bottom:12px;">
+            ⚠️ Low Stock Items Details
+          </summary>
+          <div class="low-stock-items-list" id="lowStockItemsList">
+            <div class="muted">No low stock items</div>
+          </div>
+        </details>
+
+        <!-- Expiring Items Details (Expandable) -->
+        <details class="category-breakdown" id="expiringDetails" style="display:none;">
+          <summary style="cursor:pointer; font-size:14px; font-weight:600; margin-bottom:12px;">
+            ⏰ Expiring Soon Details
+          </summary>
+          <div class="expiring-items-list" id="expiringItemsDetailList">
+            <div class="muted">No expiring items</div>
+          </div>
+        </details>
+      </div>
+
+      <div class="row">
+        <div class="col-4">
+          <label>Search pantry</label>
+          <input id="pantrySearch" placeholder="e.g., rice">
+        </div>
+        <div class="col-4">
+          <label>Filter</label>
+          <select id="pantryFilter">
+            <option value="all">All Items</option>
+            <option value="low">Low Stock Only</option>
+          </select>
+        </div>
+        <div class="col-4">
+          <label>Actions</label>
+          <div class="actions">
+            <button class="primary" id="btnPantryAdd">Add item</button>
+            <button class="ghost" id="btnPantryPrint">Print</button>
+          </div>
+        </div>
+      </div>
+      <div class="hr"></div>
+
+      <!-- Expiring Soon Widget (Keep existing widget) -->
+      <div id="expiringItemsWidget"
+        style="display:none; background:rgba(255,193,7,0.15); border:1px solid rgba(255,193,7,0.4); border-radius:10px; padding:12px; margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <div style="font-weight:600; color:#ffb300;">⚠️ Expiring Soon</div>
+          <button id="btnDismissExpiring" class="ghost" style="padding:4px 8px; font-size:11px;">Dismiss</button>
+        </div>
+        <div id="expiringItemsList" style="font-size:13px;"></div>
+      </div>
+
+      <div id="pantryList" class="list"></div>
+    </div>
+  </section>
+
+  <!-- ADMIN -->
+  <section id="tab-admin" class="grid" style="display:none;">
+    <!-- User Management Card -->
+    <div class="card" style="margin-top:12px;">
+      <h2 style="margin:0 0 8px 0;">👥 User Management</h2>
+      <div class="muted" style="margin-bottom:12px;">
+        Create and manage family member profiles for meal assignments and personalized meal planning.
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="openManageUsersModal()"
+          style="background: linear-gradient(135deg, #4da3ff 0%, #2d7bd6 100%);">
+          ⚙️ Manage Users
+        </button>
+      </div>
+      <div class="muted" style="margin-top:8px;">
+        You can also access user management by clicking on "👨‍👩‍👧‍👦 Whole Family" in the top right corner.
+      </div>
+    </div>
+
+    <div class="card" id="adminIngredientCategories">
+      <h2 style="margin:0 0 8px 0;">Ingredient Categories</h2>
+      <div class="muted" style="margin-bottom:8px;">
+        These categories populate the Category dropdown on recipe ingredients and control shopping list category
+        ordering.
+        Existing ingredients keep their current Category text even if you remove a category from this list.
+      </div>
+      <label>One category per line</label>
+      <textarea id="adminCategoriesText" rows="8" style="width:100%;"></textarea>
+      <div class="actions" style="margin-top:8px;">
+        <button id="btnSaveIngredientCategories" class="primary">Save Categories</button>
+        <button id="btnResetIngredientCategories">Reset to Defaults</button>
+      </div>
+      <div class="muted" id="adminCategoriesStatus" style="margin-top:6px;"></div>
+    </div>
+
+    <!-- Stores Management -->
+    <div class="card">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">Stores</h2>
+      <div class="muted">Stores appear in ingredient Store dropdown. Add a store and it will be available
+        immediately.
+        Use the Delete button to remove stores.</div>
+      <div class="hr"></div>
+
+      <h3 style="margin:12px 0 8px 0;font-size:14px;font-weight:600;">Add New Store</h3>
+      <div class="row">
+        <div class="col-8">
+          <label>Store name</label>
+          <input id="newStoreName" placeholder="e.g., Costco">
+        </div>
+        <div class="col-4">
+          <label>Priority (lower = earlier)</label>
+          <input id="newStorePriority" type="number" value="10">
+        </div>
+        <div class="col-12">
+          <div class="actions">
+            <button class="primary" id="btnAddStore">Add Store</button>
+            <button class="ghost" id="btnReloadStores">Reload</button>
+            <span class="muted" id="storeStatus"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <h3 style="margin:12px 0 8px 0;font-size:14px;font-weight:600;">Existing Stores</h3>
+      <div id="storeList" class="list"></div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">Admin</h2>
+      <div class="muted">Import/Export your data to sync across multiple installations.</div>
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-12">
+          <label>Data sync</label>
+
+          <!-- PHASE 8.2+: Warning help for backup/restore -->
+          <div class="help-text warning" style="margin-bottom:12px;">
+            <strong>⚠️ Important:</strong> Importing data will replace your entire database. Always export a backup
+            before importing to prevent data loss.
+          </div>
+
+          <div class="actions">
+            <button class="primary" id="btnExportData">Export data…</button>
+            <button class="ghost" id="btnImportData">Import data…</button>
+            <span class="muted" id="adminStatus"></span>
+          </div>
+          <div class="muted" style="margin-top:8px;">
+            Export creates a copy of your sqlite database. Import replaces your current local database with the
+            selected file.
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-12">
+          <label>Recipe Categories</label>
+          <div class="actions">
+            <button class="ghost" id="btnFixCategories" style="border-color: var(--accent); color: var(--accent);">Fix
+              All Recipe Categories</button>
+            <span class="muted" id="fixCategoriesStatus"></span>
+          </div>
+          <div class="muted" style="margin-top:8px;">
+            Re-categorize all ingredients in all recipes and save to database. Use this if shopping list categories
+            aren't working.
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <!-- ========== Recipe Image Download ========== -->
+      <div class="row">
+        <div class="col-12">
+          <label>📷 Recipe Images</label>
+          <div class="actions">
+            <button class="ghost" id="btnDownloadAllImages"
+              style="border-color: var(--accent); color: var(--accent);">Download All Recipe Images</button>
+            <span class="muted" id="downloadImagesStatus"></span>
+          </div>
+          <div class="muted" style="margin-top:8px;">
+            Download all recipe images from their URLs and save them locally. This improves performance and ensures
+            images are always available.
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <!-- ========== PHASE 3.3: Smart Defaults Management ========== -->
+      <div class="row">
+        <div class="col-12">
+          <label>🎯 Smart Defaults</label>
+          <div class="muted" style="margin-bottom:12px;">
+            Smart defaults remember your last-used values and auto-fill common fields. View current saved
+            preferences
+            or reset them all.
+          </div>
+
+          <div class="actions">
+            <button class="ghost" id="btnViewSmartDefaults"
+              style="border-color: var(--accent); color: var(--accent);">📊 View Smart Defaults</button>
+            <button class="danger" id="btnResetSmartDefaults">🗑️ Reset All Defaults</button>
+            <span class="muted" id="smartDefaultsStatus"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <!-- ========== PHASE 6.1: Automatic Backup System ========== -->
+      <div class="row">
+        <div class="col-12">
+          <label>🗄️ Automatic Backups</label>
+          <div class="muted" style="margin-bottom:12px;">
+            Your database is automatically backed up daily to ~/Backups/Foodie/. The last 7 backups are kept.
+          </div>
+
+          <!-- Backup Status -->
+          <div
+            style="background:rgba(77,163,255,0.1);border:1px solid rgba(77,163,255,0.3);border-radius:8px;padding:12px;margin-bottom:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <div style="font-weight:600;color:var(--fg);">Backup Status</div>
+              <button class="ghost mini" id="btnRefreshBackupStatus">🔄 Refresh</button>
+            </div>
+            <div style="font-size:13px;color:var(--muted);">
+              <div id="backupLastBackupTime">Last backup: Never</div>
+              <div id="backupLocation">Location: Loading...</div>
+              <div id="backupCount">Backups: 0</div>
+            </div>
+          </div>
+
+          <!-- Manual Backup -->
+          <div class="actions" style="margin-bottom:12px;">
+            <button class="primary" id="btnCreateBackup">Create Backup Now</button>
+            <span class="muted" id="backupStatus"></span>
+          </div>
+
+          <!-- Backup List -->
+          <div style="margin-top:16px;">
+            <div style="font-weight:600;margin-bottom:8px;color:var(--fg);">Available Backups</div>
+            <div id="backupList" class="list" style="max-height:300px;overflow-y:auto;">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-12">
+          <label>Manage Cuisines</label>
+          <div class="muted" style="margin-bottom:12px;">
+            Add new cuisines, rename existing ones, or clear them from recipes.
+          </div>
+
+          <!-- Add new cuisine -->
+          <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center;">
+            <input type="text" id="newCuisineName" placeholder="Add new cuisine..." style="flex:1; min-width:200px;" />
+            <button class="primary" id="btnAddCuisine">Add Cuisine</button>
+          </div>
+
+          <div id="cuisineManageList" class="list" style="max-height:400px; overflow-y:auto;">
+            <!-- Dynamically populated -->
+          </div>
+          <div class="muted" id="cuisineManageStatus" style="margin-top:8px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PHASE 8.2: Help & FAQ Section -->
+    <div class="card">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">❓ Help & Support</h2>
+      <div class="muted">Find answers to common questions and learn how to use Foodie effectively.</div>
+
+      <div class="hr"></div>
+
+      <!-- Help Search -->
+      <div class="help-search">
+        <input type="text" id="helpSearchInput" placeholder="Search help topics..." />
+      </div>
+
+      <!-- FAQ Container -->
+      <div class="faq-container" id="faqContainer">
+        <!-- FAQ Item 1 -->
+        <div class="faq-item" data-keywords="start begin setup first time new user">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            <span class="faq-question-text">How do I get started with meal planning?</span>
+            <span class="faq-toggle">▼</span>
+          </div>
+          <div class="faq-answer">
+            <p>Getting started is easy:</p>
+            <ul>
+              <li>Click the 📋 <strong>Planner</strong> tab</li>
+              <li>Choose your date range (default is current week)</li>
+              <li>Click on any meal slot (Breakfast/Lunch/Dinner) and select <strong>"Pick Recipe"</strong></li>
+              <li>Browse or search for recipes, then click one to assign it</li>
+              <li>Optionally assign meals to family members using the user icons</li>
+              <li>Generate a shopping list from the 🛒 <strong>Shopping List</strong> tab</li>
+            </ul>
+            <p style="margin-top:8px;"><strong>Tip:</strong> Take the guided tour by clicking the 🎯 button in the
+              header!</p>
+          </div>
+        </div>
+
+        <!-- FAQ Item 2 -->
+        <div class="faq-item" data-keywords="recipes search find browse cuisine filter">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            <span class="faq-question-text">How do I find specific recipes?</span>
+            <span class="faq-toggle">▼</span>
+          </div>
+          <div class="faq-answer">
+            <p>Use the 📚 <strong>Recipes</strong> tab to search and browse over 3,000 recipes:</p>
+            <ul>
+              <li><strong>Search:</strong> Type keywords in the search box (recipe name, ingredients, etc.)</li>
+              <li><strong>Filter by Cuisine:</strong> Select Italian, Chinese, Mexican, etc.</li>
+              <li><strong>Filter by Meal Type:</strong> Breakfast, Lunch, Dinner, or Side Dish</li>
+              <li><strong>Sort:</strong> Alphabetically or by newest</li>
+              <li><strong>Favorites:</strong> Star recipes to save them for quick access</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- FAQ Item 3 -->
+        <div class="faq-item" data-keywords="shopping list grocery ingredients generate">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            <span class="faq-question-text">How do I generate a shopping list?</span>
+            <span class="faq-toggle">▼</span>
+          </div>
+          <div class="faq-answer">
+            <p>To create a shopping list from your meal plan:</p>
+            <ul>
+              <li>Go to the 🛒 <strong>Shopping List</strong> tab</li>
+              <li>Select your date range (e.g., this week)</li>
+              <li>Click <strong>"Generate Shopping List"</strong></li>
+              <li>Ingredients are automatically organized by category (Produce, Dairy, Meat, etc.)</li>
+              <li>Add custom items using the "Add Item" button</li>
+              <li>Export to your iPhone app or print for in-store use</li>
+            </ul>
+            <p style="margin-top:8px;"><strong>Note:</strong> Items are grouped and quantities are combined
+              automatically.</p>
+          </div>
+        </div>
+
+        <!-- FAQ Item 4 -->
+        <div class="faq-item" data-keywords="users family members profiles assign personalize">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            <span class="faq-question-text">How do I set up family profiles?</span>
+            <span class="faq-toggle">▼</span>
+          </div>
+          <div class="faq-answer">
+            <p>Manage family members in the User Switcher:</p>
+            <ul>
+              <li>Click the user icon in the top-right header</li>
+              <li>Select <strong>"⚙️ Manage Users"</strong></li>
+              <li>Add family members with names and emoji avatars</li>
+              <li>Assign meals to specific people by clicking the user icon on each meal slot</li>
+              <li>Switch between profiles to see personalized views</li>
+            </ul>
+            <p style="margin-top:8px;"><strong>Tip:</strong> Shopping lists can show which items are for which
+              person!
+            </p>
+          </div>
+        </div>
+
+        <!-- FAQ Item 5 -->
+        <div class="faq-item" data-keywords="collections organize save favorites group recipes">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            <span class="faq-question-text">What are collections and how do I use them?</span>
+            <span class="faq-toggle">▼</span>
+          </div>
+          <div class="faq-answer">
+            <p>Collections help you organize recipes into custom groups:</p>
+            <ul>
+              <li>Go to the 📦 <strong>Collections</strong> tab</li>
+              <li>Create collections like "Quick Weeknight Dinners" or "Holiday Favorites"</li>
+              <li>Add recipes to collections from the recipe detail view</li>
+              <li>Assign entire collections to your meal plan with one click</li>
+              <li>Use collections to plan themed weeks (e.g., Italian Week, Healthy Eating)</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- FAQ Item 6 -->
+        <div class="faq-item" data-keywords="companion ipad iphone sync connect devices kitchen">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            <span class="faq-question-text">How do I connect my iPad or iPhone?</span>
+            <span class="faq-toggle">▼</span>
+          </div>
+          <div class="faq-answer">
+            <p>Sync with companion apps for hands-free cooking and shopping:</p>
+            <ul>
+              <li><strong>iPad (Kitchen Display):</strong> Download FoodieKitchen app, enter your Mac's IP address
+                in
+                settings, view recipes hands-free with voice commands</li>
+              <li><strong>iPhone (Shopping List):</strong> Download FoodieShoppingList app, sync shopping lists,
+                check
+                off items while shopping</li>
+              <li>Both apps connect via WebSocket - no internet required, just same Wi-Fi network</li>
+              <li>Find your Mac's IP address in the Admin tab under "Companion Apps"</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- FAQ Item 7 -->
+        <div class="faq-item" data-keywords="google calendar sync integration export events">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            <span class="faq-question-text">Can I sync meals to Google Calendar?</span>
+            <span class="faq-toggle">▼</span>
+          </div>
+          <div class="faq-answer">
+            <p>Yes! Sync your meal plan to Google Calendar:</p>
+            <ul>
+              <li>Go to the Admin tab and find "Google Calendar Sync"</li>
+              <li>Click <strong>"Authorize Google Calendar"</strong> and sign in</li>
+              <li>Select which calendar to use (or create a new "Meal Plan" calendar)</li>
+              <li>Click <strong>"Sync This Week"</strong> to create calendar events</li>
+              <li>Meals appear as all-day events with recipe titles</li>
+              <li>Re-sync anytime to update calendar with changes</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- FAQ Item 8 -->
+        <div class="faq-item" data-keywords="backup export import data sync transfer">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            <span class="faq-question-text">How do I back up my data?</span>
+            <span class="faq-toggle">▼</span>
+          </div>
+          <div class="faq-answer">
+            <p>Your data is automatically backed up daily:</p>
+            <ul>
+              <li>Automatic backups save to <code>~/Backups/Foodie/</code> every day</li>
+              <li>Last 7 backups are kept automatically</li>
+              <li>Manual backup: Admin tab → <strong>"Create Backup Now"</strong></li>
+              <li>Export database: Admin tab → <strong>"Export data"</strong></li>
+              <li>Import on another Mac: Admin tab → <strong>"Import data"</strong></li>
+            </ul>
+            <p style="margin-top:8px;"><strong>Warning:</strong> Importing replaces your entire database!</p>
+          </div>
+        </div>
+
+        <!-- FAQ Item 9 -->
+        <div class="faq-item" data-keywords="keyboard shortcuts keys hotkeys navigation">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            <span class="faq-question-text">Are there keyboard shortcuts?</span>
+            <span class="faq-toggle">▼</span>
+          </div>
+          <div class="faq-answer">
+            <p>Common keyboard shortcuts:</p>
+            <ul>
+              <li><kbd>Cmd</kbd> + <kbd>N</kbd> - New recipe (when on Recipes tab)</li>
+              <li><kbd>Cmd</kbd> + <kbd>S</kbd> - Save current changes</li>
+              <li><kbd>Cmd</kbd> + <kbd>F</kbd> - Focus search box</li>
+              <li><kbd>Cmd</kbd> + <kbd>,</kbd> - Open preferences (if implemented)</li>
+              <li><kbd>Esc</kbd> - Close modals</li>
+              <li><kbd>Tab</kbd> - Navigate between form fields</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- FAQ Item 10 -->
+        <div class="faq-item" data-keywords="pantry inventory track stock ingredients">
+          <div class="faq-question" onclick="toggleFaq(this)">
+            <span class="faq-question-text">How does the pantry system work?</span>
+            <span class="faq-toggle">▼</span>
+          </div>
+          <div class="faq-answer">
+            <p>Track your pantry inventory to avoid buying what you already have:</p>
+            <ul>
+              <li>Go to the 🥫 <strong>Pantry</strong> tab</li>
+              <li>Add ingredients you currently have at home</li>
+              <li>Shopping lists automatically exclude pantry items (optional setting)</li>
+              <li>Update quantities as you use ingredients</li>
+              <li>Set low-stock alerts for frequently used items</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="hr" style="margin-top:24px;"></div>
+
+      <div style="text-align:center; padding:12px 0;">
+        <p class="muted">Still need help? Click the 🎯 button in the header to take the guided tour!</p>
+      </div>
+    </div>
+  </section>
+  </div>
+
+  <!-- PHASE 3.5: QUICK ADD RECIPE MODAL -->
+  <div class="modalBack" id="quickAddModalBack" style="z-index: 115;">
+    <div class="modal" style="max-width: 600px;">
+      <div class="modalHead">
+        <div>
+          <div style="font-weight:700;">⚡ Quick Add Recipe</div>
+          <div class="muted">Add a recipe with just the essentials - expand later if needed</div>
+        </div>
+        <button class="ghost" id="btnQuickAddClose">Close</button>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-12">
+          <label>Recipe title *</label>
+          <input id="qaTitle" placeholder="e.g., Chicken Stir Fry" autofocus>
+        </div>
+
+        <div class="col-6">
+          <label>Cuisine</label>
+          <select id="qaCuisine">
+            <option value="">-- Select --</option>
+          </select>
+        </div>
+
+        <div class="col-6">
+          <label>Meal Type</label>
+          <select id="qaMealType">
+            <option value="Any">Any</option>
+            <option value="Breakfast">Breakfast</option>
+            <option value="Brunch">Brunch</option>
+            <option value="Lunch">Lunch</option>
+            <option value="Dinner">Dinner</option>
+            <option value="Side Dish">Side Dish</option>
+            <option value="Appetizer">Appetizer</option>
+            <option value="Snack">Snack</option>
+            <option value="Dessert">Dessert</option>
+            <option value="Beverage">Beverage</option>
+          </select>
+        </div>
+
+        <div class="col-12">
+          <label>Recipe URL (optional)</label>
+          <input id="qaUrl" placeholder="https://...">
+        </div>
+
+        <div class="col-12">
+          <label>Quick ingredients (optional - one per line)</label>
+          <textarea id="qaIngredients" placeholder="1 cup rice&#10;2 chicken breasts&#10;1 tbsp soy sauce"
+            style="min-height: 120px;"></textarea>
+          <div class="muted" style="margin-top:4px;">Format: quantity unit ingredient (e.g., "2 cups flour")</div>
+        </div>
+
+        <div class="col-12">
+          <label>Quick notes (optional)</label>
+          <textarea id="qaNotes" placeholder="Brief cooking steps or notes..." style="min-height: 80px;"></textarea>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="actions">
+        <button class="primary" id="btnQuickAddSave">💾 Save Recipe</button>
+        <button class="ghost" id="btnQuickAddSaveAndOpen">💾 Save & Edit Full Details</button>
+        <button class="ghost" id="btnQuickAddCancel">Cancel</button>
+      </div>
+
+      <div class="muted" id="qaStatus" style="margin-top:8px;"></div>
+    </div>
+  </div>
+
+  <!-- PHASE 5.1: COMMAND PALETTE -->
+  <div class="modalBack" id="commandPaletteBack" style="z-index: 120; display: none;">
+    <div class="command-palette">
+      <div class="command-palette-input-wrapper">
+        <span class="command-palette-icon">⌘</span>
+        <input type="text" id="commandPaletteInput" placeholder="Type a command or search..." autocomplete="off"
+          spellcheck="false" />
+        <span class="command-palette-hint">Esc to close</span>
+      </div>
+
+      <div class="command-palette-results" id="commandPaletteResults">
+        <!-- Results will be populated dynamically -->
+      </div>
+
+      <div class="command-palette-footer">
+        <div class="command-palette-footer-hint">
+          <kbd>↑</kbd> <kbd>↓</kbd> to navigate &nbsp;•&nbsp;
+          <kbd>Enter</kbd> to select &nbsp;•&nbsp;
+          <kbd>Esc</kbd> to close
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RECIPE MODAL -->
+  <div class="modalBack" id="recipeModalBack">
+    <div class="modal">
+      <div class="modalHead">
+        <div>
+          <div style="font-weight:700;" id="rmTitle">Recipe</div>
+          <div class="muted" id="rmSub">View/Edit recipe + instructions + ingredients.</div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="btnModalPrintRecipe">🖨️ Print</button>
+          <button class="ghost" id="btnModalToggleEdit">Edit</button>
+          <button class="ghost" id="btnModalClose">Close</button>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-12">
+          <label>Recipe title</label>
+          <input id="rTitle" placeholder="e.g., Cold Sesame Noodles" tabindex="1">
+        </div>
+
+        <div class="col-12">
+          <label>Recipe URL</label>
+          <input id="rUrl" placeholder="https://..." tabindex="2">
+          <div class="muted" id="rUrlView" style="margin-top:6px;"></div>
+        </div>
+
+        <div class="col-12">
+          <label>Image URL</label>
+          <input id="rImage" placeholder="https://example.com/image.jpg" tabindex="2.5">
+        </div>
+
+        <div class="col-6">
+          <label>Cuisine</label>
+          <select id="rCuisine" tabindex="3"></select>
+        </div>
+
+        <div class="col-6">
+          <label>MealType</label>
+          <select id="rMealType" tabindex="4">
+            <option value="Any">Any</option>
+            <option value="Breakfast">Breakfast</option>
+            <option value="Brunch">Brunch</option>
+            <option value="Lunch">Lunch</option>
+            <option value="Dinner">Dinner</option>
+            <option value="Side Dish">Side Dish</option>
+            <option value="Appetizer">Appetizer</option>
+            <option value="Snack">Snack</option>
+            <option value="Dessert">Dessert</option>
+            <option value="Beverage">Beverage</option>
+          </select>
+        </div>
+
+        <div class="col-12">
+          <label>Instructions</label>
+          <textarea id="rInstructions" placeholder="Step-by-step..." tabindex="5"></textarea>
+        </div>
+
+        <div class="col-12">
+          <label>Notes</label>
+          <textarea id="rNotes" placeholder="Any notes" tabindex="6"></textarea>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <!-- Recipe Scaling Controls - Always Visible -->
+      <div class="scale-controls" id="scaleControls">
+        <label>Scale Recipe:</label>
+        <button class="ghost" data-action="scale-down" title="Decrease serving size">−</button>
+        <span class="scale-value" id="scaleValue">1.0x</span>
+        <button class="ghost" data-action="scale-up" title="Increase serving size">+</button>
+        <button class="ghost" data-action="scale-reset" title="Reset to original">Reset</button>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+        <div>
+          <div style="font-weight:700;">Ingredients <span class="muted" style="font-weight:400;font-size:12px;">(Type
+              name to auto-categorize)</span></div>
+          <div class="muted">We show a clean "Ingredient" input (raw). Normalized is hidden by default for UX.</div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="btnCategorizeAll" title="Categorize all uncategorized ingredients">Categorize
+            All</button>
+          <button class="ghost" id="btnAddIngredientRow">Add row</button>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+      <div id="ingTableWrap"></div>
+
+      <div class="hr"></div>
+
+      <div class="actions" id="modalActions">
+        <button class="primary" id="btnSaveRecipeFull">Save Recipe + Ingredients</button>
+        <button class="danger" id="btnDeleteRecipe">Delete Recipe</button>
+        <span class="muted" id="rmStatus"></span>
+      </div>
+
+      <!-- View mode actions (no longer needed here as print moved to header) -->
+      <div class="actions" id="viewModeActions" style="display:none;">
+      </div>
+    </div>
+  </div>
+
+  <!-- MEAL PICKER MODAL -->
+  <div class="modalBack" id="mealPickerBack">
+    <div class="modal">
+      <div class="modalHead">
+        <div>
+          <div style="font-weight:700;" id="mpTitle">Pick a recipe</div>
+          <div class="muted" id="mpSub"></div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="btnMealPickerClose">Close</button>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-12">
+          <label>Search recipes</label>
+          <input id="mpSearch" placeholder="type to search...">
+          <div class="muted" id="mpStatus" style="margin-top:6px;"></div>
+        </div>
+        <div class="col-12">
+          <div class="actions">
+            <button class="danger" id="mpClearMeal">Clear meal</button>
+            <button class="ghost" id="mpUseLeftovers">Use Leftovers</button>
+            <button class="ghost" id="mpUseCollection">Use Collection Recipe</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PHASE 4.5.5: Meal Assignment UI -->
+      <div class="hr"></div>
+      <div class="row">
+        <div class="col-12">
+          <label>This meal is for:</label>
+          <div id="mpAssignmentEditor" class="meal-assignment-editor">
+            <!-- Populated dynamically by renderMealAssignmentEditor() -->
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+      <div id="mpList" class="list" style="max-height: 70vh; overflow:auto;"></div>
+    </div>
+  </div>
+
+  <!-- LEFTOVERS PICKER MODAL -->
+  <div class="modalBack" id="leftoverPickerBack" style="z-index: 105;">
+    <div class="modal" style="max-width: 600px;">
+      <div class="modalHead">
+        <div>
+          <div style="font-weight:700;">Pick Leftovers</div>
+          <div class="muted">Select a meal from the past 3 days</div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="btnLeftoverPickerClose">Close</button>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+      <div id="leftoverList" class="list" style="max-height: 60vh; overflow:auto;"></div>
+    </div>
+  </div>
+
+  <!-- COLLECTION RECIPE PICKER MODAL -->
+  <div class="modalBack" id="collectionRecipePickerBack" style="z-index: 105;">
+    <div class="modal" style="max-width: 700px;">
+      <div class="modalHead">
+        <div>
+          <div style="font-weight:700;">Pick Collection Recipe</div>
+          <div class="muted">Select a recipe from your collections</div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="btnCollectionRecipePickerClose">Close</button>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-12">
+          <label>Select Collection</label>
+          <select id="collectionRecipePickerSelect">
+            <option value="">-- Choose a collection --</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+      <div id="collectionRecipePickerList" class="list" style="max-height: 60vh; overflow:auto;">
+        <div class="muted">Select a collection to view recipes</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ASSIGN TO PLANNER MODAL -->
+  <div class="modalBack" id="assignToPlannerBack" style="z-index: 105;">
+    <div class="modal" style="max-width: 500px;">
+      <div class="modalHead">
+        <div>
+          <div style="font-weight:700;">Assign to Planner</div>
+          <div class="muted" id="assignToPlannerRecipeTitle"></div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="btnAssignToPlannerClose">Close</button>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-6">
+          <label>Date</label>
+          <input type="date" id="assignToPlannerDate">
+        </div>
+        <div class="col-6">
+          <label>Meal Slot</label>
+          <select id="assignToPlannerSlot">
+            <option value="Breakfast">Breakfast</option>
+            <option value="Lunch">Lunch</option>
+            <option value="Dinner">Dinner</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="actions">
+        <button class="primary" id="btnConfirmAssignToPlanner">Assign to Planner</button>
+        <span class="muted" id="assignToPlannerStatus"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- COLLECTION MODAL -->
+  <div class="modalBack" id="collectionModalBack" style="z-index: 105;">
+    <div class="modal" style="max-width: 700px;">
+      <div class="modalHead">
+        <div>
+          <div style="font-weight:700;" id="collectionModalTitle">Create Collection</div>
+          <div class="muted">Organize recipes into custom collections</div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="btnCollectionModalClose">Close</button>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-12">
+          <label>Collection Name</label>
+          <input id="collectionName" placeholder="e.g., Quick Weeknight Dinners">
+        </div>
+        <div class="col-12">
+          <label>Description (optional)</label>
+          <textarea id="collectionDescription" placeholder="Brief description..." rows="3"></textarea>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="actions">
+        <button class="primary" id="btnSaveCollection">Save Collection</button>
+        <button class="danger" id="btnDeleteCollection" style="display:none;">Delete Collection</button>
+        <span class="muted" id="collectionModalStatus"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ASSIGN RECIPES TO COLLECTION MODAL -->
+  <div class="modalBack" id="assignRecipesModalBack" style="z-index: 106;">
+    <div class="modal">
+      <div class="modalHead">
+        <div>
+          <div style="font-weight:700;" id="assignRecipesModalTitle">Assign Recipes to Collection</div>
+          <div class="muted" id="assignRecipesModalSubtitle"></div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="btnAssignRecipesModalClose">Close</button>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-12">
+          <label>Search recipes</label>
+          <input id="assignRecipesSearch" placeholder="Type to search...">
+        </div>
+      </div>
+
+      <div class="hr"></div>
+      <div id="assignRecipesList" class="list" style="max-height: 60vh; overflow:auto;"></div>
+    </div>
+  </div>
+
+  <!-- SHOPPING LIST PREVIEW MODAL -->
+  <div class="modalBack" id="shoppingListPreviewBack" style="z-index: 107;">
+    <div class="modal"
+      style="max-width: 900px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column;">
+      <div class="modalHead">
+        <div>
+          <div style="font-weight:700;">🛒 Shopping List Preview</div>
+          <div class="muted" id="shoppingListPreviewSubtitle">Review before printing</div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="btnConfirmPrintShopping">🖨️ Print</button>
+          <button class="ghost" id="btnShoppingListPreviewClose">Close</button>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div id="shoppingListPreviewContent"
+        style="flex: 1; overflow-y: auto; padding: 12px; background: rgba(255,255,255,0.02); border-radius: 8px; border: 1px solid var(--line);">
+        <!-- Preview content will be inserted here -->
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="actions">
+        <button class="ghost" id="btnCancelPrintShopping">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- IMPORT RECIPE FROM URL MODAL -->
+  <div class="modalBack" id="importRecipeModalBack" style="z-index: 107;">
+    <div class="modal" style="max-width: 800px;">
+      <div class="modalHead">
+        <div>
+          <div style="font-weight:700;">🔗 Import Recipe from URL</div>
+          <div class="muted">Paste a recipe URL to auto-import ingredients and instructions</div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="btnImportRecipeModalClose">Close</button>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-12">
+          <label>Recipe URL</label>
+          <input id="importRecipeUrl" type="url" placeholder="https://www.allrecipes.com/recipe/...">
+          <div class="muted" style="margin-top:6px;">Supports: AllRecipes, NYT Cooking, Food Network, Serious Eats,
+            Bon
+            Appétit, and more</div>
+        </div>
+        <div class="col-12">
+          <div class="actions">
+            <button class="primary" id="btnFetchRecipe">Fetch Recipe</button>
+            <span class="muted" id="importRecipeStatus"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hr" id="importPreviewDivider" style="display:none;"></div>
+
+      <!-- Preview Section -->
+      <div id="importRecipePreview" style="display:none;">
+        <div style="font-weight:600; margin-bottom:12px;">Preview - Review before saving</div>
+
+        <div class="import-preview-grid">
+          <!-- Left Column: Edit Form -->
+          <div class="import-edit-form">
+            <div class="row">
+              <div class="col-8">
+                <label>Recipe Title</label>
+                <input id="importPreviewTitle" type="text" placeholder="Recipe Title">
+              </div>
+              <div class="col-4">
+                <label>Servings</label>
+                <input id="importPreviewServings" type="number" min="1" value="4">
+              </div>
+              <div class="col-6">
+                <label>Cuisine</label>
+                <select id="importPreviewCuisine">
+                  <option value="">Unknown</option>
+                </select>
+              </div>
+              <div class="col-6">
+                <label>Meal Type</label>
+                <select id="importPreviewMealType">
+                  <option value="Any">Any</option>
+                  <option value="Breakfast">Breakfast</option>
+                  <option value="Brunch">Brunch</option>
+                  <option value="Lunch">Lunch</option>
+                  <option value="Dinner">Dinner</option>
+                  <option value="Side Dish">Side Dish</option>
+                  <option value="Appetizer">Appetizer</option>
+                  <option value="Snack">Snack</option>
+                  <option value="Dessert">Dessert</option>
+                  <option value="Beverage">Beverage</option>
+                </select>
+              </div>
+              <div class="col-12">
+                <label>Image URL (optional)</label>
+                <input id="importPreviewImageUrl" type="url" placeholder="https://example.com/image.jpg">
+              </div>
+              <div class="col-12">
+                <label>Ingredients (one per line)</label>
+                <textarea id="importPreviewIngredients" rows="8"
+                  placeholder="1 cup flour&#10;2 eggs&#10;1/2 cup milk"></textarea>
+              </div>
+              <div class="col-12">
+                <label>Instructions</label>
+                <textarea id="importPreviewInstructions" rows="8"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: Visual Preview -->
+          <div class="import-visual-preview">
+            <label>Visual Preview</label>
+            <div class="recipe-preview-card card">
+              <div id="importPreviewCardImage" class="preview-card-image"
+                style="background-image: url('https://via.placeholder.com/400x200?text=No+Image');"></div>
+              <div class="preview-card-content">
+                <div id="importPreviewCardBadge" class="pill accent">Any</div>
+                <h3 id="importPreviewCardTitle" style="margin: 12px 0 8px 0; font-size: 20px;">Recipe Title</h3>
+                <div class="muted" style="font-size: 13px;">
+                  <span id="importPreviewCardCuisine">Unknown Cuisine</span> •
+                  <span id="importPreviewCardServings">4</span> servings
+                </div>
+              </div>
+            </div>
+            <div class="help-text" style="margin-top: 20px;">
+              <strong>Tip:</strong> You can edit the title, ingredients, or instructions directly on the left to fix
+              any parsing errors.
+            </div>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="actions">
+          <button class="primary" id="btnSaveImportedRecipe">Save Recipe</button>
+          <button class="ghost" id="btnCancelImport">Cancel</button>
+          <span class="muted" id="importSaveStatus"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SHOPPING LIST RENAME MODAL -->
+  <div class="modalBack" id="shopRenameModalBack" style="z-index: 125;">
+    <div class="modal" style="max-width: 500px;">
+      <div class="modalHead">
+        <div>
+          <div style="font-weight:700;">✏️ Rename Shopping Item</div>
+          <div class="muted">This updates ingredients in all recipes to match</div>
+        </div>
+        <button class="ghost" onclick="closeModal('shopRenameModalBack')">✕</button>
+      </div>
+      <div class="hr"></div>
+      <div style="padding: 20px;">
+        <label>New Name</label>
+        <input type="text" id="shopRenameInput" style="width: 100%; font-size: 16px; padding: 12px;" />
+        <input type="hidden" id="shopRenameSourceIds" />
+        <input type="hidden" id="shopRenameOldName" />
+        <div id="shopRenameError" class="danger-text" style="margin-top: 10px; font-size: 13px;"></div>
+      </div>
+      <div class="hr"></div>
+      <div class="actions" style="padding: 16px 20px;">
+        <button class="primary" id="btnShopRenameSave">Save Changes</button>
+        <button class="ghost" onclick="closeModal('shopRenameModalBack')">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MEAL PLANNER PREFERENCES MODAL -->
+  <div class="modalBack" id="mealPlannerPrefsBack" style="z-index: 108;">
+    <div class="modal" style="max-width: 700px;">
+      <div class="modalHead">
+        <div>
+          <div style="font-weight:700;">⚙️ Smart Meal Planner Preferences</div>
+          <div class="muted">Customize how the AI generates your weekly meal plan</div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="btnMealPlannerPrefsClose">Close</button>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <!-- Favorite Cuisines Section -->
+      <div class="prefs-section">
+        <div class="prefs-section-title">
+          <span>🌍 Favorite Cuisines</span>
+        </div>
+        <div class="cuisine-grid" id="cuisineGrid">
+          <!-- Dynamically populated from database -->
+        </div>
+      </div>
+
+      <!-- Variety Settings Section -->
+      <div class="prefs-section">
+        <div class="prefs-section-title"><span>🎯 Variety Settings</span></div>
+        <div class="variety-options">
+          <label class="variety-option">
+            <input type="checkbox" id="prefAvoidRepeat" checked>
+            <div class="variety-option-content">
+              <div class="variety-option-title">Avoid Repeating Cuisines</div>
+              <div class="variety-option-desc">Don't use the same cuisine on consecutive days</div>
+            </div>
+          </label>
+
+          <label class="variety-option">
+            <input type="checkbox" id="prefAvoidRecipeRepeat">
+            <div class="variety-option-content">
+              <div class="variety-option-title">Avoid Repeating Recipes</div>
+              <div class="variety-option-desc">Don't use the same recipe within a specified number of days</div>
+            </div>
+          </label>
+
+          <div id="recipeRepeatOptions"
+            style="margin-left: 40px; display: none; padding: 12px; background: rgba(255,255,255,0.02); border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);">
+            <div style="margin-bottom: 12px;">
+              <label style="display: block; font-size: 13px; color: var(--text); margin-bottom: 6px;">
+                Don't repeat recipes within
+                <input type="number" id="prefRecipeRepeatDays" min="1" max="7" value="3"
+                  style="width: 60px; padding: 4px 8px; margin: 0 4px; display: inline-block; min-height: auto;">
+                days
+              </label>
+            </div>
+            <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">Exclude from this rule:</div>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+              <label
+                style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: var(--text);">
+                <input type="checkbox" id="prefExcludeBreakfast"
+                  style="cursor: pointer; width: 16px; height: 16px; min-height: 16px; margin: 0;">
+                <span>Breakfast</span>
+              </label>
+              <label
+                style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: var(--text);">
+                <input type="checkbox" id="prefExcludeLunch"
+                  style="cursor: pointer; width: 16px; height: 16px; min-height: 16px; margin: 0;">
+                <span>Lunch</span>
+              </label>
+              <label
+                style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: var(--text);">
+                <input type="checkbox" id="prefExcludeDinner"
+                  style="cursor: pointer; width: 16px; height: 16px; min-height: 16px; margin: 0;">
+                <span>Dinner</span>
+              </label>
+            </div>
+          </div>
+
+          <label class="variety-option">
+            <input type="checkbox" id="prefUsePantry" checked>
+            <div class="variety-option-content">
+              <div class="variety-option-title">Prioritize Pantry Ingredients</div>
+              <div class="variety-option-desc">Suggest recipes that use ingredients you already have</div>
+            </div>
+          </label>
+          <label class="variety-option">
+            <input type="checkbox" id="prefFavoritesOnly">
+            <div class="variety-option-content">
+              <div class="variety-option-title">Favorites Only</div>
+              <div class="variety-option-desc">Only suggest from recipes marked as favorites</div>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <!-- Breakfast Preference Section -->
+      <div class="prefs-section">
+        <div class="prefs-section-title"><span>🍳 Breakfast Preference</span></div>
+        <div class="breakfast-select-wrapper">
+          <select id="prefBreakfastStyle">
+            <option value="varied">Varied - Different breakfast each day</option>
+            <option value="simple">Simple - Quick and easy recipes only</option>
+            <option value="same">Same - Use one recipe all week</option>
+            <option value="skip">Skip - Don't plan breakfasts</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="prefs-save-section">
+        <button class="primary" id="btnSaveMealPlannerPrefs">💾 Save Preferences</button>
+        <span class="muted" id="mealPlannerPrefsStatus"></span>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Pantry item modal -->
+  <div id="pantryModalOverlay" class="modalBack" style="z-index:9999;">
+    <div class="modal animate-in" style="max-width:520px;">
+      <div class="modalHead">
+        <div>
+          <div id="pantryModalTitle" style="font-weight:700;">Pantry Item</div>
+          <div class="muted">Add or edit items in your inventory</div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="pantryModalClose">✕</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-12">
+          <label for="pantryModalName">Name</label>
+          <input id="pantryModalName" type="text" placeholder="e.g., Chicken Breast" />
+        </div>
+
+        <div class="col-6">
+          <label for="pantryModalQtyNum">Qty (number)</label>
+          <input id="pantryModalQtyNum" type="text" inputmode="decimal" list="dlPantryQtyNum" placeholder="1.0" />
+        </div>
+
+        <div class="col-6">
+          <label for="pantryModalUnit">Unit</label>
+          <select id="pantryModalUnit">
+            <option value="">-- Select Unit --</option>
+          </select>
+          <input id="pantryModalUnitCustom" type="text" placeholder="Enter custom unit"
+            style="margin-top:8px; display:none;" />
+        </div>
+
+        <div class="col-6">
+          <label for="pantryModalLowStock">Low stock threshold</label>
+          <input id="pantryModalLowStock" type="text" inputmode="decimal" placeholder="e.g., 1" />
+        </div>
+
+        <div class="col-6">
+          <label for="pantryModalExpiration">Expiration date (optional)</label>
+          <input id="pantryModalExpiration" type="date" />
+        </div>
+
+        <div class="col-6">
+          <label for="pantryModalCategory">Category</label>
+          <select id="pantryModalCategory"></select>
+        </div>
+
+        <div class="col-6">
+          <label for="pantryModalStoreId">Store (optional)</label>
+          <select id="pantryModalStoreId"></select>
+        </div>
+
+        <div class="col-12">
+          <label for="pantryModalQtyText">Qty text (optional)</label>
+          <input id="pantryModalQtyText" type="text" placeholder="e.g., 2 packs" />
+        </div>
+
+        <div class="col-12">
+          <label for="pantryModalNotes">Notes (optional)</label>
+          <textarea id="pantryModalNotes" placeholder="Any additional details..."></textarea>
+        </div>
+      </div>
+
+      <div id="pantryModalError" class="muted" style="color:var(--danger); margin-top:12px; display:none;"></div>
+
+      <div class="hr"></div>
+
+      <div class="actions" style="justify-content:flex-end; margin-top:8px;">
+        <button id="pantryModalCancel" class="ghost">Cancel</button>
+        <button id="pantryModalSave" class="primary">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Companion Panel for iOS Apps -->
+  <!-- Companion button now in header -->
+
+  <div class="companion-panel" id="companionPanel">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <strong>iOS Companion</strong>
+      <button class="mini ghost" onclick="document.getElementById('companionPanel').classList.remove('show')">✕</button>
+    </div>
+
+    <div class="companion-status">
+      <div class="companion-status-dot" id="companionStatusDot"></div>
+      <div id="companionStatusText">Checking...</div>
+    </div>
+
+    <div class="hr"></div>
+
+    <div style="margin-bottom:12px;">
+      <strong style="font-size:13px;">Connected Devices</strong>
+      <div id="companionDeviceList" style="margin-top:8px; min-height:40px;">
+        <div class="muted" style="font-size:12px;">No devices connected</div>
+      </div>
+    </div>
+
+    <div class="hr"></div>
+
+    <div>
+      <strong style="font-size:13px; display:block; margin-bottom:8px;">Quick Actions</strong>
+      <button class="companion-action-btn" id="companionSendShopping" onclick="sendShoppingListToPhones()">
+        📋 Send Shopping List to iPhone
+      </button>
+      <button class="companion-action-btn" id="companionSendMeals" onclick="sendTodaysMealsToTablets()">
+        🍽️ Send Today's Meals to iPad
+      </button>
+      <button class="companion-action-btn" id="companionSendRecipe" onclick="sendCurrentRecipeToTablet()" disabled>
+        👨‍🍳 Send Current Recipe to iPad
+      </button>
+    </div>
+
+    <div class="hr"></div>
+
+    <div style="font-size:12px; color:var(--text); background:rgba(77,163,255,0.1); padding:10px; border-radius:8px;">
+      <div style="font-weight:600; margin-bottom:4px;">Configure iOS Apps:</div>
+      <div style="font-size:11px; color:var(--muted); margin-bottom:6px;">
+        iPhone: Enter full address<br>
+        iPad: Enter IP only (no ws:// or :8080)
+      </div>
+      <code id="companionServerAddress"
+        style="font-size:11px; background:rgba(0,0,0,0.2); padding:4px 8px; border-radius:4px; display:inline-block; font-weight:600;">Checking...</code>
+    </div>
+  </div>
+
+  <!-- PHASE 3.1: Recent Actions History Panel -->
+  <!-- Recent actions button now in header -->
+
+  <div class="recent-actions-panel" id="recentActionsPanel">
+    <div class="recent-actions-header">
+      <div class="recent-actions-title">Recent Actions</div>
+      <button class="mini ghost"
+        onclick="document.getElementById('recentActionsPanel').classList.remove('show')">✕</button>
+    </div>
+
+    <div class="recent-section">
+      <div class="recent-section-title">
+        <span>👁️</span>
+        <span>Recently Viewed Recipes</span>
+        <button class="recent-clear-btn" id="btnClearRecentRecipes" style="margin-left:auto;">Clear</button>
+      </div>
+      <div id="recentRecipesList">
+        <div class="recent-empty">No recent recipes</div>
+      </div>
+    </div>
+
+    <div class="hr"></div>
+
+    <div class="recent-section">
+      <div class="recent-section-title">
+        <span>📅</span>
+        <span>Recently Planned Meals</span>
+        <button class="recent-clear-btn" id="btnClearRecentMeals" style="margin-left:auto;">Clear</button>
+      </div>
+      <div id="recentMealsList">
+        <div class="recent-empty">No recent meal assignments</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+  <script src="js/ai-chef.js"></script>
+</body>
+
+</html>

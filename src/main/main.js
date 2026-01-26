@@ -1,0 +1,2150 @@
+require('dotenv').config();
+const path = require('path');
+const { app, BrowserWindow, ipcMain, dialog, Menu, globalShortcut, protocol, net } = require('electron');
+const { createDb, getDbPathDefault, setDbPath } = require('./db');
+const { handleApiCall } = require('./api');
+const WebSocket = require('ws');
+const http = require('http');
+const os = require('os');
+const fs = require('fs');
+const { Bonjour } = require('bonjour-service');
+
+// Handle uncaught exceptions gracefully (especially network errors like EHOSTUNREACH)
+process.on('uncaughtException', (err) => {
+  if (err.code === 'EHOSTUNREACH' || err.code === 'ENETUNREACH' || err.code === 'ENOTFOUND') {
+    console.warn('[Network] Network unreachable, ignoring mDNS/Bonjour error:', err.message);
+    return;
+  }
+  if (err.message && err.message.includes('224.0.0.251')) {
+    console.warn('[Network] mDNS multicast failed (network unavailable):', err.message);
+    return;
+  }
+  console.error('[Uncaught Exception]', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  if (reason && (reason.code === 'EHOSTUNREACH' || reason.code === 'ENETUNREACH')) {
+    console.warn('[Network] Unhandled rejection due to network unavailability:', reason.message);
+    return;
+  }
+  console.error('[Unhandled Rejection]', reason);
+});
+
+// Set consistent app name for userData folder
+// This ensures dev and production use the same folder
+app.setName('Foodie Meal Planner');
+
+// Register custom protocol as privileged BEFORE app.whenReady()
+// This is required for the protocol to work in production builds
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'foodie-image',
+    privileges: {
+      secure: true,
+      supportFetchAPI: true,
+      bypassCSP: true,
+      corsEnabled: false
+    }
+  }
+]);
+
+
+let StoreCtor = null;
+async function getStoreCtor() {
+  if (StoreCtor) return StoreCtor;
+  const mod = await import('electron-store');
+  StoreCtor = mod.default;
+  return StoreCtor;
+}
+
+let store = null;
+async function initStore() {
+  const Store = await getStoreCtor();
+  store = new Store({
+    name: 'foodie-settings',
+    defaults: {
+      dbPath: '',
+      calendarName: 'Foodie Meal Planner',
+      googleCalendarId: 'primary',
+    },
+  });
+  return store;
+}
+
+// ========================================
+// COMPANION SERVER (WebSocket)
+// ========================================
+
+class CompanionServer {
+  constructor() {
+    this.wss = null;
+    this.clients = new Map(); // deviceId -> { ws, deviceType, ip }
+    this.mainWindow = null;
+    this.server = null; // Underlying HTTP server
+
+    // ========== PHASE 9.6: STATE TRACKING FOR DIFFERENTIAL SYNC ==========
+    this.clientState = new Map(); // deviceId -> { lastMealPlanHash, lastShoppingListHash, lastSyncTime }
+    this.pendingBatches = new Map(); // deviceId -> { messages: [], timeout }
+    this.BATCH_DELAY = 100; // ms - wait 100ms to collect messages before sending
+
+    this.bonjour = new Bonjour();
+    this.service = null;
+  }
+
+  // Send log to both console and renderer window
+  log(level, ...args) {
+    const message = args.join(' ');
+    console.log(...args);
+
+    // Also send to renderer if window exists
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('companion-log', { level, message });
+    }
+  }
+
+  // Serialize recipe object for safe JSON transmission
+  serializeRecipe(recipe) {
+    if (!recipe) return null;
+
+    return {
+      RecipeId: recipe.RecipeId || '',
+      Title: recipe.Title || '',
+      URL: recipe.URL || '',
+      Cuisine: recipe.Cuisine || '',
+      MealType: recipe.MealType || '',
+      Notes: recipe.Notes || '',
+      Instructions: recipe.Instructions || '',
+      Image_Name: recipe.Image_Name || ''
+    };
+  }
+
+  // Serialize ingredient object for safe JSON transmission
+  serializeIngredient(ing) {
+    if (!ing) return null;
+
+    return {
+      idx: ing.idx || 0,
+      IngredientNorm: ing.IngredientNorm || '',
+      IngredientRaw: ing.IngredientRaw || '',
+      QtyText: ing.QtyText || '',
+      QtyNum: ing.QtyNum || null,
+      Unit: ing.Unit || '',
+      Category: ing.Category || '',
+      StoreId: ing.StoreId || ''
+    };
+  }
+
+  // ========== PHASE 9.6: HASH FUNCTION FOR DIFFERENTIAL SYNC ==========
+  hashObject_(obj) {
+    // Simple hash function - stringify and hash
+    const str = JSON.stringify(obj);
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return hash;
+  }
+
+  // ========== PHASE 9.6: MESSAGE BATCHING ==========
+  batchMessage_(deviceId, message) {
+    // Get or create batch for this device
+    if (!this.pendingBatches.has(deviceId)) {
+      this.pendingBatches.set(deviceId, { messages: [], timeout: null });
+    }
+
+    const batch = this.pendingBatches.get(deviceId);
+    batch.messages.push(message);
+
+    // Clear existing timeout
+    if (batch.timeout) {
+      clearTimeout(batch.timeout);
+    }
+
+    // Set new timeout to send batch after delay
+    batch.timeout = setTimeout(() => {
+      this.flushBatch_(deviceId);
+    }, this.BATCH_DELAY);
+  }
+
+  flushBatch_(deviceId) {
+    const client = this.clients.get(deviceId);
+    const batch = this.pendingBatches.get(deviceId);
+
+    if (!client || !batch || batch.messages.length === 0) {
+      return;
+    }
+
+    try {
+      // If only one message, send it directly
+      if (batch.messages.length === 1) {
+        client.ws.send(JSON.stringify(batch.messages[0]));
+        console.log(`[Phase 9.6] Sent 1 message to ${deviceId}`);
+      } else {
+        // Send as batched message
+        client.ws.send(JSON.stringify({
+          type: 'batch',
+          messages: batch.messages,
+          timestamp: new Date().toISOString()
+        }));
+        console.log(`[Phase 9.6] Batched ${batch.messages.length} messages to ${deviceId}`);
+      }
+    } catch (error) {
+      console.error(`Error flushing batch to ${deviceId}:`, error);
+    }
+
+    // Clear batch
+    this.pendingBatches.delete(deviceId);
+  }
+
+  startBonjourService(port) {
+    try {
+      // Stop existing service if any
+      if (this.service) {
+        try {
+          this.service.stop();
+        } catch (e) {
+          // Ignore stop errors
+        }
+        this.service = null;
+      }
+
+      this.service = this.bonjour.publish({
+        name: `Foodie Meal Planner (${os.hostname()})`,
+        type: 'foodie',
+        protocol: 'tcp',
+        port: port,
+        txt: {
+          version: '1.0.0',
+          serverId: os.hostname()
+        }
+      });
+
+      if (this.service) {
+        this.service.on('up', () => {
+          console.log(`📡 Bonjour service advertised: ${this.service.name}`);
+        });
+
+        this.service.on('error', (err) => {
+          // Don't crash the app if Bonjour fails
+          if (err.code === 'EHOSTUNREACH' || err.code === 'ENETUNREACH') {
+            console.warn('📡 Network unreachable for Bonjour multicast - will retry when network is available');
+          } else {
+            console.error('📡 Bonjour service error:', err.message || err);
+          }
+        });
+      }
+    } catch (bonjourError) {
+      console.warn('📡 Failed to start Bonjour advertisement:', bonjourError.message || bonjourError);
+    }
+  }
+
+  start(port = 8080) {
+    try {
+      // Create HTTP server for both WebSockets and Image serving
+      this.server = http.createServer((req, res) => {
+        // Simple static file server for images
+        if (req.url.startsWith('/images/')) {
+          const imageName = path.basename(req.url);
+          const imagePath = path.join(app.getPath('userData'), 'images', imageName);
+
+          fs.access(imagePath, fs.constants.R_OK, (err) => {
+            if (err) {
+              res.statusCode = 404;
+              res.end('Image not found');
+              return;
+            }
+
+            const ext = path.extname(imageName).toLowerCase();
+            const mimeTypes = {
+              '.jpg': 'image/jpeg',
+              '.jpeg': 'image/jpeg',
+              '.png': 'image/png',
+              '.webp': 'image/webp'
+            };
+
+            res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream');
+            fs.createReadStream(imagePath).pipe(res);
+          });
+          return;
+        }
+
+        res.statusCode = 404;
+        res.end('Not found');
+      });
+
+      this.wss = new WebSocket.Server({ server: this.server });
+      this.server.listen(port);
+
+      console.log(`📱 Companion server & Image server started on port ${port}`);
+      this.logLocalIPs();
+
+      // Advertise service via Bonjour (with network error resilience)
+      this.startBonjourService(port);
+
+      this.wss.on('connection', (ws, req) => {
+        const clientIp = req.socket.remoteAddress;
+        const deviceId = req.headers['x-device-id'] || `device-${Date.now()}`;
+        const deviceType = req.headers['x-device-type'] || 'unknown';
+
+        this.clients.set(deviceId, { ws, deviceType, ip: clientIp });
+
+        // ========== PHASE 9.6: Initialize client state ==========
+        this.clientState.set(deviceId, {
+          lastMealPlanHash: null,
+          lastShoppingListHash: null,
+          lastSyncTime: Date.now()
+        });
+
+        console.log(`📱 ${deviceType} connected: ${deviceId} (${clientIp})`);
+
+        // Send initial connection success
+        ws.send(JSON.stringify({
+          type: 'connected',
+          serverId: os.hostname(),
+          timestamp: new Date().toISOString()
+        }));
+
+        ws.on('message', (message) => {
+          try {
+            const data = JSON.parse(message.toString());
+            this.handleMessage(deviceId, data);
+          } catch (error) {
+            console.error('Error parsing message:', error);
+          }
+        });
+
+        ws.on('close', () => {
+          this.clients.delete(deviceId);
+          // ========== PHASE 9.6: Clean up state and pending batches ==========
+          this.clientState.delete(deviceId);
+          if (this.pendingBatches.has(deviceId)) {
+            const batch = this.pendingBatches.get(deviceId);
+            if (batch.timeout) clearTimeout(batch.timeout);
+            this.pendingBatches.delete(deviceId);
+          }
+          console.log(`📱 ${deviceType} disconnected: ${deviceId}`);
+          this.notifyDevicesChanged();
+        });
+
+        ws.on('error', (error) => {
+          console.error(`WebSocket error for ${deviceId}:`, error);
+        });
+
+        this.notifyDevicesChanged();
+      });
+
+      this.wss.on('error', (error) => {
+        console.error('WebSocket server error:', error);
+      });
+
+    } catch (error) {
+      console.error('Failed to start companion server:', error);
+    }
+  }
+
+  async handleMessage(deviceId, message) {
+    const client = this.clients.get(deviceId);
+    if (!client) return;
+
+    try {
+      switch (message.type) {
+        case 'ping':
+          client.ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+          break;
+
+        case 'request_shopping_list':
+          await this.sendShoppingList(deviceId);
+          break;
+
+        case 'request_store_list':
+          await this.sendStoreList(deviceId);
+          break;
+
+        case 'request_meal_plan':
+          await this.sendMealPlan(deviceId, message.date);
+          break;
+
+        case 'request_recipe':
+          await this.sendRecipe(deviceId, message.recipeId);
+          break;
+
+        case 'load_recipe':
+          // iPad sends load_recipe with recipeId in data object
+          if (message.data && message.data.recipeId) {
+            await this.sendRecipe(deviceId, message.data.recipeId);
+          }
+          break;
+
+        case 'sync_changes':
+          await this.handleSyncChanges(deviceId, message.data);
+          break;
+
+        case 'item_removed':
+          await this.handleItemRemoved(deviceId, message);
+          break;
+
+        case 'item_unpurchased':
+          await this.handleItemUnpurchased(deviceId, message);
+          break;
+
+        case 'add_pantry_item':
+          await this.handleAddPantryItem(deviceId, message);
+          break;
+
+        case 'timer_update':
+          // Relay timer updates to all other devices (Echo)
+          this.broadcastToOthers(deviceId, message);
+          break;
+
+        default:
+          console.log(`Unknown message type: ${message.type}`);
+      }
+    } catch (error) {
+      console.error(`Error handling message from ${deviceId}:`, error);
+    }
+  }
+
+  async sendShoppingList(deviceId) {
+    const client = this.clients.get(deviceId);
+    if (!client) return;
+
+    try {
+      // Generate shopping list from today's meal plan for the active user
+      const today = new Date().toISOString().split('T')[0];
+
+      // Get active user from renderer or use Whole Family as fallback
+      const activeUserRes = await handleApiCall({ fn: 'getActiveUser', payload: {}, store });
+      const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
+
+      const planResult = await handleApiCall({
+        fn: 'getUserPlanMeals',
+        payload: { start: today, end: today, userId },
+        store
+      });
+
+      let items = [];
+
+      if (planResult && planResult.ok && Array.isArray(planResult.plans) && planResult.plans.length > 0) {
+        const plan = planResult.plans[0];
+        const recipeIds = [];
+
+        if (plan.Breakfast?.RecipeId) recipeIds.push(plan.Breakfast.RecipeId);
+        if (plan.Lunch?.RecipeId) recipeIds.push(plan.Lunch.RecipeId);
+        if (plan.Dinner?.RecipeId) recipeIds.push(plan.Dinner.RecipeId);
+
+        for (const recipeId of recipeIds) {
+          const ingredientsResult = await handleApiCall({
+            fn: 'listRecipeIngredients',
+            payload: { recipeId },
+            store
+          });
+
+          if (ingredientsResult && ingredientsResult.ok && Array.isArray(ingredientsResult.items)) {
+            // Serialize each ingredient to ensure clean data
+            const serializedIngredients = ingredientsResult.items.map(ing => {
+              const serialized = this.serializeIngredient(ing);
+              return {
+                ItemId: `${recipeId}-${ing.idx || 0}`,  // iOS expects "ItemId"
+                IngredientName: serialized.IngredientNorm || serialized.IngredientRaw || 'Unknown',  // iOS expects "IngredientName"
+                QtyText: serialized.QtyText || (serialized.QtyNum ? String(serialized.QtyNum) : ''),  // iOS expects "QtyText"
+                Unit: serialized.Unit || '',
+                Category: serialized.Category || '',
+                StoreName: serialized.StoreId || 'kroger',  // iOS expects "StoreName"
+                RecipeId: recipeId,
+                is_purchased: 0  // iOS expects "is_purchased" as int
+              };
+            });
+            items.push(...serializedIngredients);
+          }
+        }
+      }
+
+      client.ws.send(JSON.stringify({
+        type: 'shopping_list',
+        data: items,
+        timestamp: new Date().toISOString()
+      }));
+      console.log(`📤 Sent ${items.length} shopping items to ${client.deviceType}`);
+    } catch (error) {
+      console.error('Error sending shopping list:', error);
+    }
+  }
+
+  async sendStoreList(deviceId) {
+    const client = this.clients.get(deviceId);
+    if (!client) return;
+
+    try {
+      const result = await handleApiCall({
+        fn: 'listStores',
+        payload: {},
+        store
+      });
+
+      if (result && result.ok && Array.isArray(result.items)) {
+        client.ws.send(JSON.stringify({
+          type: 'store_list',
+          data: result.items.map(s => ({ StoreId: s.StoreId, Name: s.Name })),
+          timestamp: new Date().toISOString()
+        }));
+        console.log(`📋 Sent ${result.items.length} stores to ${client.deviceType}`);
+      }
+    } catch (error) {
+      console.error(`Error sending store list to ${deviceId}:`, error);
+    }
+  }
+
+  async sendMealPlan(deviceId, date = new Date().toISOString().split('T')[0]) {
+    const client = this.clients.get(deviceId);
+    if (!client) return;
+
+    try {
+      // Get active user from renderer
+      const activeUserRes = await handleApiCall({ fn: 'getActiveUser', payload: {}, store });
+      const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
+
+      const planResult = await handleApiCall({
+        fn: 'getUserPlanMeals',
+        payload: {
+          start: date,
+          end: date,
+          userId
+        },
+        store
+      });
+
+      let meals = [];
+      if (planResult && planResult.ok && Array.isArray(planResult.plans) && planResult.plans.length > 0) {
+        const plan = planResult.plans[0];
+
+        for (const slot of ['Breakfast', 'Lunch', 'Dinner']) {
+          const meal = plan[slot];
+          if (meal && meal.RecipeId) {
+            // PHASE 4.5.7: Get meal assignments
+            const assignmentsResult = await handleApiCall({
+              fn: 'getMealAssignments',
+              payload: { date, slot },
+              store
+            });
+
+            const assignedUsers = (assignmentsResult && assignmentsResult.ok && assignmentsResult.assignments)
+              ? assignmentsResult.assignments.map(a => ({
+                userId: a.userId,
+                name: a.name,
+                avatarEmoji: a.avatarEmoji || '👤',
+                email: a.email || null
+              }))
+              : [];
+
+            // PHASE 4.5.7: Get additional items
+            const additionalResult = await handleApiCall({
+              fn: 'getAdditionalItems',
+              payload: { date, slot },
+              store
+            });
+
+            const additionalItems = (additionalResult && additionalResult.ok && additionalResult.items)
+              ? additionalResult.items.map(item => ({
+                recipeId: item.RecipeId,
+                title: item.Title,
+                itemType: item.ItemType || 'side'
+              }))
+              : [];
+
+            meals.push({
+              slot: slot.toLowerCase(),
+              recipeId: meal.RecipeId,
+              title: meal.Title,
+              imageName: meal.Image_Name || '',
+              assignedUsers: assignedUsers,
+              additionalItems: additionalItems
+            });
+          }
+        }
+      }
+
+      // ========== PHASE 9.6: DIFFERENTIAL SYNC - Only send if changed ==========
+      const mealPlanHash = this.hashObject_(meals);
+      const state = this.clientState.get(deviceId);
+
+      if (state && state.lastMealPlanHash === mealPlanHash) {
+        console.log(`[Phase 9.6] Meal plan unchanged for ${deviceId}, skipping send`);
+        return;
+      }
+
+      // Update state
+      if (state) {
+        state.lastMealPlanHash = mealPlanHash;
+        state.lastSyncTime = Date.now();
+      }
+
+      // ========== PHASE 9.6: Use message batching ==========
+      this.batchMessage_(deviceId, {
+        type: 'meal_plan',
+        date: date,
+        data: meals,
+        timestamp: new Date().toISOString()
+      });
+
+      console.log(`[Phase 9.6] Queued meal plan update for ${deviceId} (${meals.length} meals)`);
+    } catch (error) {
+      console.error('Error sending meal plan:', error);
+    }
+  }
+
+  async sendRecipe(deviceId, recipeId) {
+    const client = this.clients.get(deviceId);
+    if (!client) return;
+
+    try {
+      const recipeResult = await handleApiCall({
+        fn: 'getRecipe',
+        payload: { recipeId },
+        store
+      });
+
+      const ingredientsResult = await handleApiCall({
+        fn: 'listRecipeIngredients',
+        payload: { recipeId },
+        store
+      });
+
+      if (recipeResult && recipeResult.ok && ingredientsResult && ingredientsResult.ok) {
+        // Fetch pantry for checkmarks (Phase 4: Pantry Intelligence)
+        const pantryResult = await handleApiCall({
+          fn: 'listPantry',
+          payload: {},
+          store
+        });
+        const pantryNames = new Set((pantryResult.items || []).map(p => p.IngredientName.toLowerCase()));
+
+        const serializedRecipe = this.serializeRecipe(recipeResult.recipe);
+        const serializedIngredients = (ingredientsResult.items || []).map(ing => {
+          const s = this.serializeIngredient(ing);
+          const name = s.IngredientNorm || s.IngredientRaw || 'Unknown';
+          return {
+            IngredientId: `${recipeId}-${ing.idx || 0}`,
+            IngredientName: name,
+            QtyText: s.QtyText || '',
+            QtyNum: s.QtyNum,
+            Unit: s.Unit || '',
+            Category: s.Category || 'Other',
+            hasInPantry: pantryNames.has(name.toLowerCase())
+          };
+        });
+
+        client.ws.send(JSON.stringify({
+          type: 'recipe',
+          data: {
+            ...serializedRecipe,
+            ingredients: serializedIngredients
+          },
+          timestamp: new Date().toISOString()
+        }));
+        console.log(`📤 Sent recipe "${recipeResult.recipe.Title}" to ${client.deviceType}`);
+      }
+    } catch (error) {
+      console.error('Error sending recipe:', error);
+    }
+  }
+
+  async handleSyncChanges(deviceId, changes) {
+    const client = this.clients.get(deviceId);
+    if (!client || !Array.isArray(changes)) return;
+
+    console.log(`📥 Syncing ${changes.length} changes from ${client.deviceType}`);
+
+    let updatedCount = 0;
+    let addedCount = 0;
+    let deletedCount = 0;
+
+    for (const change of changes) {
+      try {
+        const { id, isPurchased, isManuallyAdded, isDeleted, name, quantity, category } = change;
+
+        if (isDeleted) {
+          const result = await handleApiCall({
+            fn: 'deleteShoppingItem',
+            payload: { itemId: id },
+            store
+          });
+          if (result && result.ok) deletedCount++;
+          continue;
+        }
+
+        if (isManuallyAdded) {
+          // Try to add new item
+          const result = await handleApiCall({
+            fn: 'addShoppingItem',
+            payload: {
+              itemId: id,
+              ingredientName: name,
+              qtyText: quantity || '',
+              category: category || 'Other',
+              isPurchased: isPurchased ? 1 : 0
+            },
+            store
+          });
+          if (result && result.ok) {
+            addedCount++;
+          } else {
+            // Item might exist, try update
+            const updateResult = await handleApiCall({
+              fn: 'updateShoppingItem',
+              payload: {
+                itemId: id,
+                isPurchased: isPurchased ? 1 : 0
+              },
+              store
+            });
+            if (updateResult && updateResult.ok) updatedCount++;
+          }
+        } else {
+          // Update existing item
+          const result = await handleApiCall({
+            fn: 'updateShoppingItem',
+            payload: {
+              itemId: id,
+              isPurchased: isPurchased ? 1 : 0
+            },
+            store
+          });
+          if (result && result.ok) updatedCount++;
+        }
+      } catch (error) {
+        console.error(`Error syncing change:`, error);
+      }
+    }
+
+    console.log(`✅ Sync complete: ${updatedCount} updated, ${addedCount} added, ${deletedCount} deleted`);
+
+    // Send confirmation
+    client.ws.send(JSON.stringify({
+      type: 'sync_confirmed',
+      data: {
+        updated: updatedCount,
+        added: addedCount,
+        deleted: deletedCount
+      },
+      timestamp: new Date().toISOString()
+    }));
+
+    // Notify desktop UI
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('shopping-list:updated', {
+        updated: updatedCount,
+        added: addedCount,
+        deleted: deletedCount
+      });
+    }
+  }
+
+  async handleItemRemoved(deviceId, message) {
+    const client = this.clients.get(deviceId);
+    if (!client) return;
+
+    try {
+      const { ingredient, qty, unit, itemId } = message;
+
+      console.log(`📥 Item removed from ${client.deviceType}: ${ingredient} (${qty} ${unit})`);
+
+      // Return item to pantry
+      const result = await handleApiCall({
+        fn: 'returnItemToPantry',
+        payload: {
+          ingredientNorm: ingredient,
+          qty: qty,
+          unit: unit
+        },
+        store
+      });
+
+      if (result && result.ok) {
+        console.log(`✅ Returned to pantry: ${ingredient} (${qty} ${unit})`);
+
+        // Send confirmation to iPhone
+        client.ws.send(JSON.stringify({
+          type: 'item_removed_confirmed',
+          itemId: itemId,
+          timestamp: new Date().toISOString()
+        }));
+
+        // Notify desktop UI
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.webContents.send('pantry-updated', {
+            action: 'returned',
+            ingredient: ingredient,
+            qty: qty,
+            unit: unit
+          });
+        }
+      } else {
+        console.error(`❌ Failed to return to pantry: ${result?.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error(`Error handling item removal from ${deviceId}:`, error);
+    }
+  }
+
+  async handleItemUnpurchased(deviceId, message) {
+    const client = this.clients.get(deviceId);
+    if (!client) return;
+
+    try {
+      const { ingredient, qty, unit, itemId } = message;
+
+      console.log(`📥 Item unmarked as purchased from ${client.deviceType}: ${ingredient} (${qty} ${unit})`);
+
+      // Return item to pantry
+      const result = await handleApiCall({
+        fn: 'returnItemToPantry',
+        payload: {
+          ingredientNorm: ingredient,
+          qty: qty,
+          unit: unit
+        },
+        store
+      });
+
+      if (result && result.ok) {
+        console.log(`✅ Returned to pantry: ${ingredient} (${qty} ${unit})`);
+
+        // Send confirmation to iPhone
+        client.ws.send(JSON.stringify({
+          type: 'item_unpurchased_confirmed',
+          itemId: itemId,
+          timestamp: new Date().toISOString()
+        }));
+
+        // Notify desktop UI
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.webContents.send('pantry-updated', {
+            action: 'returned',
+            ingredient: ingredient,
+            qty: qty,
+            unit: unit
+          });
+        }
+      } else {
+        console.error(`❌ Failed to return to pantry: ${result?.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error(`Error handling item unpurchase from ${deviceId}:`, error);
+    }
+  }
+
+  async handleAddPantryItem(deviceId, message) {
+    const client = this.clients.get(deviceId);
+    if (!client) return;
+
+    try {
+      const { name, qtyText, qtyNum, unit, category, store, barcode, notes } = message.data;
+
+      console.log(`📷 Barcode scanned from ${client.deviceType}: ${name} (${barcode})`);
+
+      // Add to pantry using existing API
+      const result = await handleApiCall({
+        fn: 'upsertPantryItem',
+        payload: {
+          name: name,
+          qtyText: qtyText,
+          qtyNum: qtyNum,
+          unit: unit,
+          notes: notes || `Scanned barcode: ${barcode}`,
+          storeId: store || null
+        },
+        store
+      });
+
+      if (result && result.ok) {
+        console.log(`✅ Added to pantry: ${name}`);
+
+        // Send confirmation to iPhone
+        client.ws.send(JSON.stringify({
+          type: 'pantry_add_confirmed',
+          data: { name, qtyText },
+          timestamp: new Date().toISOString()
+        }));
+
+        // Notify desktop UI of pantry update
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.webContents.send('pantry-updated', {
+            action: 'added',
+            item: name,
+            barcode: barcode
+          });
+        }
+      } else {
+        console.error(`❌ Failed to add to pantry: ${result?.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error(`Error handling barcode scan from ${deviceId}:`, error);
+    }
+  }
+
+  pushToDeviceType(deviceType, data) {
+    const targetType = deviceType.toLowerCase();
+    let sentCount = 0;
+
+    this.log('info', `🔍 pushToDeviceType('${deviceType}') called - checking ${this.clients.size} connected client(s)`);
+
+    for (const [deviceId, client] of this.clients.entries()) {
+      if (client.deviceType.toLowerCase() === targetType) {
+        if (client.ws.readyState === WebSocket.OPEN) {
+          try {
+            const payload = JSON.stringify(data);
+            // Log message preview (first 200 chars)
+            const preview = payload.length > 200 ? payload.substring(0, 200) + '...' : payload;
+            this.log('info', `📤 Sending to ${deviceId}: ${preview}`);
+
+            client.ws.send(payload);
+            sentCount++;
+            this.log('success', `✅ Sent to ${deviceType} device: ${deviceId}`);
+          } catch (error) {
+            this.log('error', `❌ Failed to send to ${deviceId}:`, error.message);
+          }
+        } else {
+          this.log('warn', `⚠️  Skipping ${deviceId} - WebSocket not OPEN (state: ${client.ws.readyState})`);
+        }
+      }
+    }
+
+    this.log('info', `📊 pushToDeviceType('${deviceType}'): Sent to ${sentCount} device(s)`);
+    return sentCount;
+  }
+
+  async pushShoppingListToPhones() {
+    console.log('🔍 pushShoppingListToPhones: Starting...');
+    try {
+      // Generate shopping list from today's meal plan
+      const today = new Date().toISOString().split('T')[0];
+      console.log(`🔍 pushShoppingListToPhones: Today is ${today}`);
+
+      // Get today's meal plan
+      const planResult = await handleApiCall({
+        fn: 'getPlansRange',
+        payload: { start: today, end: today },
+        store
+      });
+
+      if (!planResult || !planResult.ok || !Array.isArray(planResult.plans) || planResult.plans.length === 0) {
+        // No meal plan for today - send empty list
+        const sentCount = this.pushToDeviceType('iphone', {
+          type: 'shopping_list_update',
+          data: [],
+          timestamp: new Date().toISOString()
+        });
+        console.log(`📤 Pushed empty shopping list (no meal plan for today)`);
+        return sentCount;
+      }
+
+      const plan = planResult.plans[0];
+      const recipeIds = [];
+
+      // Collect all recipe IDs from today's meals
+      if (plan.Breakfast?.RecipeId) recipeIds.push(plan.Breakfast.RecipeId);
+      if (plan.Lunch?.RecipeId) recipeIds.push(plan.Lunch.RecipeId);
+      if (plan.Dinner?.RecipeId) recipeIds.push(plan.Dinner.RecipeId);
+
+      if (recipeIds.length === 0) {
+        // Meal plan exists but no recipes - send empty list
+        const sentCount = this.pushToDeviceType('iphone', {
+          type: 'shopping_list_update',
+          data: [],
+          timestamp: new Date().toISOString()
+        });
+        console.log(`📤 Pushed empty shopping list (no recipes in today's plan)`);
+        return sentCount;
+      }
+
+      // Get all ingredients for all recipes
+      const allIngredients = [];
+      for (const recipeId of recipeIds) {
+        const ingredientsResult = await handleApiCall({
+          fn: 'listRecipeIngredients',
+          payload: { recipeId },
+          store
+        });
+
+        if (ingredientsResult && ingredientsResult.ok && Array.isArray(ingredientsResult.items)) {
+          // Serialize each ingredient to ensure clean data
+          const serializedIngredients = ingredientsResult.items.map(ing => {
+            const serialized = this.serializeIngredient(ing);
+            return {
+              ItemId: `${recipeId}-${ing.idx || 0}`,  // iOS expects "ItemId"
+              IngredientName: serialized.IngredientNorm || serialized.IngredientRaw || 'Unknown',  // iOS expects "IngredientName"
+              QtyText: serialized.QtyText || (serialized.QtyNum ? String(serialized.QtyNum) : ''),  // iOS expects "QtyText"
+              Unit: serialized.Unit || '',
+              Category: serialized.Category || '',
+              StoreName: serialized.StoreId || 'kroger',  // iOS expects "StoreName"
+              RecipeId: recipeId,
+              is_purchased: 0  // iOS expects "is_purchased" as int
+            };
+          });
+          allIngredients.push(...serializedIngredients);
+        }
+      }
+
+      const sentCount = this.pushToDeviceType('iphone', {
+        type: 'shopping_list_update',
+        data: allIngredients,
+        timestamp: new Date().toISOString()
+      });
+
+      console.log(`📤 Pushed shopping list (${allIngredients.length} items from ${recipeIds.length} recipes) to all iPhones`);
+
+      return sentCount;
+    } catch (error) {
+      console.error('Error pushing shopping list:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Push pre-formatted shopping list items to all connected iPhones
+   * This is used when the renderer has already generated a shopping list
+   */
+  async pushShoppingListItems(items) {
+    console.log('🔍 pushShoppingListItems: Starting with', items.length, 'items');
+    try {
+      // Format items for iOS app
+      const formattedItems = items.map((item, idx) => ({
+        ItemId: item.id || `item-${idx}`,
+        IngredientName: item.IngredientNorm || item.name || 'Unknown',
+        QtyText: item.QtyText || item.quantity || '',
+        Unit: item.Unit || item.unit || '',
+        Category: item.Category || item.category || '',
+        StoreName: item.StoreName || item.store || '',
+        is_purchased: item.isPurchased ? 1 : 0
+      }));
+
+      const sentCount = this.pushToDeviceType('iphone', {
+        type: 'shopping_list_update',
+        data: formattedItems,
+        timestamp: new Date().toISOString()
+      });
+
+      console.log(`📤 Pushed ${formattedItems.length} shopping items to ${sentCount} iPhone(s)`);
+      return sentCount;
+    } catch (error) {
+      console.error('Error pushing shopping list items:', error);
+      throw error;
+    }
+  }
+
+  async pushTodaysMealsToTablets() {
+    console.log('🔍 pushTodaysMealsToTablets: Starting...');
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      console.log(`🔍 pushTodaysMealsToTablets: Today is ${today}`);
+
+      // Get today's meal plan using the correct API
+      const planResult = await handleApiCall({
+        fn: 'getPlansRange',
+        payload: {
+          start: today,
+          end: today
+        },
+        store
+      });
+
+      if (!planResult || !planResult.ok || !Array.isArray(planResult.plans) || planResult.plans.length === 0) {
+        // No meal plan - send empty array
+        const sentCount = this.pushToDeviceType('ipad', {
+          type: 'todays_meals',
+          data: { data: [] },  // iOS expects nested data structure even when empty
+          timestamp: new Date().toISOString()
+        });
+        console.log(`📤 Pushed empty meal plan (no plan for today)`);
+        return sentCount;
+      }
+
+      const plan = planResult.plans[0];
+      const meals = [];
+
+      // Process each meal slot
+      for (const slot of ['Breakfast', 'Lunch', 'Dinner']) {
+        const meal = plan[slot];
+        if (!meal || !meal.RecipeId) continue;
+
+        const recipeId = meal.RecipeId;
+        const title = meal.Title;
+
+        // Get recipe details
+        const recipeResult = await handleApiCall({
+          fn: 'getRecipe',
+          payload: { recipeId },
+          store
+        });
+
+        // Get ingredients
+        const ingredientsResult = await handleApiCall({
+          fn: 'listRecipeIngredients',
+          payload: { recipeId },
+          store
+        });
+
+        // PHASE 4.5.7: Get meal assignments
+        const assignmentsResult = await handleApiCall({
+          fn: 'getMealAssignments',
+          payload: { date: today, slot },
+          store
+        });
+
+        const assignedUsers = (assignmentsResult && assignmentsResult.ok && assignmentsResult.assignments)
+          ? assignmentsResult.assignments.map(a => ({
+            userId: a.userId,
+            name: a.name,
+            avatarEmoji: a.avatarEmoji || '👤',
+            email: a.email || null
+          }))
+          : [];
+
+        // PHASE 4.5.7: Get additional items
+        const additionalResult = await handleApiCall({
+          fn: 'getAdditionalItems',
+          payload: { date: today, slot },
+          store
+        });
+
+        const additionalItems = (additionalResult && additionalResult.ok && additionalResult.items)
+          ? additionalResult.items.map(item => ({
+            recipeId: item.RecipeId,
+            title: item.Title,
+            itemType: item.ItemType || 'side'
+          }))
+          : [];
+
+        // Format recipe for iOS with ingredients embedded
+        if (recipeResult && recipeResult.ok) {
+          const serializedRecipe = this.serializeRecipe(recipeResult.recipe);
+          const serializedIngredients = ingredientsResult && ingredientsResult.ok
+            ? (ingredientsResult.items || []).map(ing => {
+              const s = this.serializeIngredient(ing);
+              return {
+                IngredientId: `${recipeId}-${ing.idx || 0}`,
+                IngredientName: s.IngredientNorm || s.IngredientRaw || 'Unknown',
+                QtyText: s.QtyText || '',
+                QtyNum: s.QtyNum,
+                Unit: s.Unit || '',
+                Category: s.Category || 'Other'
+              };
+            })
+            : [];
+
+          meals.push({
+            slot: slot.toLowerCase(),
+            recipe: {
+              ...serializedRecipe,
+              ingredients: serializedIngredients
+            },
+            assignedUsers: assignedUsers,
+            additionalItems: additionalItems
+          });
+        }
+      }
+
+      const sentCount = this.pushToDeviceType('ipad', {
+        type: 'todays_meals',
+        data: { data: meals },  // iOS expects nested data structure
+        date: today,
+        timestamp: new Date().toISOString()
+      });
+
+      console.log(`📤 Pushed ${meals.length} meals for today to all iPads`);
+      return sentCount;
+    } catch (error) {
+      console.error('Error pushing meals:', error);
+      throw error;
+    }
+  }
+
+  async pushRecipeToTablet(recipeId) {
+    try {
+      const recipeResult = await handleApiCall({
+        fn: 'getRecipe',
+        payload: { recipeId },
+        store
+      });
+
+      const ingredientsResult = await handleApiCall({
+        fn: 'listRecipeIngredients',
+        payload: { recipeId },
+        store
+      });
+
+      if (recipeResult && recipeResult.ok && ingredientsResult && ingredientsResult.ok) {
+        const serializedRecipe = this.serializeRecipe(recipeResult.recipe);
+        const serializedIngredients = (ingredientsResult.items || []).map(ing => {
+          const s = this.serializeIngredient(ing);
+          return {
+            IngredientId: `${recipeId}-${ing.idx || 0}`,
+            IngredientName: s.IngredientNorm || s.IngredientRaw || 'Unknown',
+            QtyText: s.QtyText || '',
+            QtyNum: s.QtyNum,
+            Unit: s.Unit || '',
+            Category: s.Category || 'Other'
+          };
+        });
+
+        this.pushToDeviceType('ipad', {
+          type: 'recipe',
+          data: {
+            ...serializedRecipe,
+            ingredients: serializedIngredients
+          },
+          timestamp: new Date().toISOString()
+        });
+        console.log(`📤 Pushed recipe to all iPads`);
+        return true;
+      }
+    } catch (error) {
+      console.error('Error pushing recipe:', error);
+      return false;
+    }
+  }
+
+  logLocalIPs() {
+    const interfaces = os.networkInterfaces();
+    console.log('\n📱 Connect iOS devices to:');
+
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name]) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          console.log(`   ws://${iface.address}:8080`);
+        }
+      }
+    }
+    console.log('');
+  }
+
+  getConnectedDevices() {
+    return Array.from(this.clients.entries()).map(([id, client]) => ({
+      id,
+      type: client.deviceType,
+      ip: client.ip
+    }));
+  }
+
+  notifyDevicesChanged() {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      const devices = this.getConnectedDevices();
+      this.mainWindow.webContents.send('companion:devices-changed', devices);
+    }
+  }
+
+  setMainWindow(win) {
+    this.mainWindow = win;
+  }
+
+  stop() {
+    if (this.wss) {
+      this.wss.close();
+      console.log('📱 Companion server stopped');
+    }
+  }
+}
+
+// Global companion server instance
+let companionServer = null;
+
+function getIndexPath() {
+  // Support either src/renderer/index.html (common) or src/index.html
+  const candidates = [
+    path.join(__dirname, '..', 'renderer', 'index.html'),
+    path.join(__dirname, '..', 'index.html'),
+    path.join(__dirname, 'index.html'),
+  ];
+  for (const p of candidates) {
+    try {
+      // eslint-disable-next-line no-sync
+      require('fs').accessSync(p);
+      return p;
+    } catch (_) { }
+  }
+  // Fall back to renderer path
+  return candidates[0];
+}
+
+function buildMenu(win) {
+  const template = [
+    ...(process.platform === 'darwin'
+      ? [{
+        label: app.name,
+        submenu: [
+          { role: 'about' },
+          { type: 'separator' },
+          { role: 'services' },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { role: 'quit' },
+        ],
+      }]
+      : []),
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Select Database Folder…',
+          accelerator: 'CmdOrCtrl+O',
+          click: async () => {
+            const res = await dialog.showOpenDialog(win, {
+              title: 'Select Foodie data folder',
+              properties: ['openDirectory', 'createDirectory'],
+            });
+            if (res.canceled || !res.filePaths || !res.filePaths[0]) return;
+            const folder = res.filePaths[0];
+            const filePath = path.join(folder, 'foodie.sqlite');
+            setDbPath(filePath);
+            if (store) store.set('dbPath', filePath);
+            win.webContents.send('foodie-db-path-changed', { dbPath: filePath });
+          },
+        },
+        { type: 'separator' },
+        { role: 'close' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'delete' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'togglefullscreen' },
+        { type: 'separator' },
+        {
+          label: 'Toggle Developer Tools',
+          accelerator: 'Alt+Command+I',
+          click: () => {
+            if (!win) return;
+            win.webContents.toggleDevTools();
+          },
+        },
+      ],
+    },
+    { role: 'windowMenu' },
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
+
+async function createWindow() {
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 820,
+    show: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      webSecurity: true, // Enabled for security since we use foodie-image protocol
+    },
+  });
+
+  buildMenu(win);
+
+  // Always provide shortcuts (menu sometimes fails to appear in custom builds)
+  try {
+    globalShortcut.register('CommandOrControl+Shift+I', () => win.webContents.toggleDevTools());
+    globalShortcut.register('F12', () => win.webContents.toggleDevTools());
+  } catch (_) { }
+
+  const indexPath = getIndexPath();
+  await win.loadFile(indexPath);
+
+  win.on('closed', () => {
+    try { globalShortcut.unregisterAll(); } catch (_) { }
+  });
+
+  return win;
+}
+
+async function bootstrap() {
+  await initStore();
+
+  // Initialize DB location
+  // Always use the default (userData) live DB; db.js will seed it from ./data/foodie.sqlite when needed.
+  const dbPath = getDbPathDefault(app);
+  try { store.set('dbPath', dbPath); } catch (_) { }
+  setDbPath(dbPath);
+
+  // Open DB and run migrations (db.js handles idempotence)
+  createDb();
+
+  // Register custom protocol to serve local images
+  protocol.handle('foodie-image', (request) => {
+    const url = request.url.replace('foodie-image://', '');
+    const imagePath = path.join(app.getPath('userData'), 'images', url);
+
+    console.log('[foodie-image] Request:', url);
+    console.log('[foodie-image] Full path:', imagePath);
+    console.log('[foodie-image] Exists:', fs.existsSync(imagePath));
+
+    if (fs.existsSync(imagePath)) {
+      return net.fetch('file://' + imagePath);
+    } else {
+      console.warn('[foodie-image] Image not found:', imagePath);
+      return new Response('Not found', { status: 404 });
+    }
+  });
+
+  // ========== PHASE 6.1: Run daily backup check ==========
+  checkAndRunDailyBackup();
+
+  // Set up periodic backup check (every 6 hours)
+  setInterval(() => {
+    checkAndRunDailyBackup();
+  }, 6 * 60 * 60 * 1000); // 6 hours in milliseconds
+
+  // Initialize companion server for iOS apps
+  companionServer = new CompanionServer();
+  companionServer.start(8080);
+
+  // IPC: API bridge
+  ipcMain.handle('foodie-api', async (_evt, { fn, payload }) => {
+    const result = await handleApiCall({ fn, payload, store });
+    return result;
+  });
+
+
+  // IPC: Print recipe (native macOS dialog)
+  ipcMain.handle('foodie-print-recipe', async (_evt, { recipeId }) => {
+    try {
+      const rid = String(recipeId || '').trim();
+      if (!rid) return { ok: false, error: 'Missing recipeId' };
+
+      const rRes = await handleApiCall({ fn: 'getRecipe', payload: { recipeId: rid }, store });
+      if (!rRes || !rRes.ok) return { ok: false, error: rRes?.error || 'getRecipe failed' };
+      const iRes = await handleApiCall({ fn: 'listRecipeIngredients', payload: { recipeId: rid }, store });
+      const recipe = rRes.recipe || {};
+      const ingredients = (iRes && iRes.ok && Array.isArray(iRes.items)) ? iRes.items : [];
+
+      const esc = (s) => String(s ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+      const html = `<!doctype html><html><head><meta charset="utf-8" />
+        <title>${esc(recipe.Title || 'Recipe')}</title>
+        <style>
+          body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial;margin:24px;}
+          h1{margin:0 0 8px 0;font-size:22px;}
+          .meta{color:#555;margin-bottom:16px;}
+          h2{margin:18px 0 8px;font-size:16px;}
+          ul{padding-left:18px;}
+          li{margin:4px 0;}
+          pre{white-space:pre-wrap;}
+          .muted{color:#666;}
+        </style></head><body>
+        <h1>${esc(recipe.Title || '')}</h1>
+        <div class="meta">
+          <span>${esc(recipe.MealType || 'Any')}</span>
+          ${recipe.Cuisine ? ` • <span>${esc(recipe.Cuisine)}</span>` : ``}
+          ${recipe.URL ? ` • <span class="muted">${esc(recipe.URL)}</span>` : ``}
+        </div>
+        <h2>Ingredients</h2>
+        ${ingredients.length ? `<ul>${ingredients.map(it => {
+        const qty = [it.QtyText || it.QtyNum || '', it.Unit || ''].filter(Boolean).join(' ').trim();
+        const storeName = it.StoreName ? ` (${esc(it.StoreName)})` : '';
+        const name = it.IngredientRaw || it.IngredientNorm || it.Name || '';
+        return `<li>${esc((qty ? qty + ' ' : '') + name)}${storeName}</li>`;
+      }).join('')}</ul>` : `<div class="muted">No ingredients.</div>`}
+        <h2>Instructions</h2>
+        ${recipe.Instructions ? `<pre>${esc(recipe.Instructions)}</pre>` : `<div class="muted">No instructions.</div>`}
+        ${recipe.Notes ? `<h2>Notes</h2><pre>${esc(recipe.Notes)}</pre>` : ``}
+        </body></html>`;
+
+      const win = new BrowserWindow({ width: 900, height: 700, show: false, webPreferences: { sandbox: false } });
+      await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+
+      return await new Promise((resolve) => {
+        win.webContents.print({ silent: false, printBackground: true }, (success, failureReason) => {
+          try { win.close(); } catch (_) { }
+          if (!success) resolve({ ok: false, error: failureReason || 'Print failed' });
+          else resolve({ ok: true });
+        });
+      });
+    } catch (e) {
+      return { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+  });
+
+  // IPC: Export / Import DB file for syncing across installations
+
+
+  // IPC: Print shopping list (native macOS dialog)
+  ipcMain.handle('foodie-print-shopping', async (_evt, { storeName, items }) => {
+    try {
+      const sn = String(storeName || '').trim() || 'Shopping List';
+      const arr = Array.isArray(items) ? items : [];
+      if (!arr.length) return { ok: false, error: 'No items to print.' };
+
+      const esc = (s) => String(s ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+      const rows = arr.map(it => {
+        const name = esc(it.IngredientNorm || '');
+        const qty = esc(it.QtyDisplay || it.QtyText || '');
+        const unit = esc(it.Unit || '');
+        const right = [qty, unit].filter(Boolean).join(' ').trim();
+        return `<tr><td>${name}</td><td style="text-align:right; white-space:nowrap;">${right}</td></tr>`;
+      }).join('');
+
+      const html = `<!doctype html><html><head><meta charset="utf-8" />
+        <title>${esc(sn)}</title>
+        <style>
+          body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial;margin:24px;}
+          h1{margin:0 0 12px 0;font-size:20px;}
+          table{width:100%;border-collapse:collapse;}
+          th,td{padding:8px 6px;border-bottom:1px solid #ddd;vertical-align:top;}
+          th{text-align:left;color:#444;font-weight:600;}
+        </style></head><body>
+        <h1>${esc(sn)}</h1>
+        <table>
+          <thead><tr><th>Item</th><th style="text-align:right;">Qty</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        </body></html>`;
+
+      const win = new BrowserWindow({ width: 900, height: 700, show: false, webPreferences: { sandbox: false } });
+      await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+
+      return await new Promise((resolve) => {
+        win.webContents.print({ silent: false, printBackground: true }, (success, failureReason) => {
+          try { win.close(); } catch (_) { }
+          if (!success) resolve({ ok: false, error: failureReason || 'Print failed' });
+          else resolve({ ok: true });
+        });
+      });
+    } catch (e) {
+      return { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+  });
+
+  ipcMain.handle('foodie-print-pantry', async (_evt, { byCategory, title }) => {
+    try {
+      const printTitle = String(title || '').trim() || 'Pantry Inventory';
+      const categories = byCategory || {};
+
+      const esc = (s) => String(s ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+      const categoryBlocks = Object.keys(categories).sort().map(cat => {
+        const items = categories[cat] || [];
+        const rows = items.map(it => `
+          <tr>
+            <td>${esc(it.Name)}</td>
+            <td style="text-align:right;">${esc(it.Qty)}</td>
+            <td>${esc(it.Store)}</td>
+            <td style="font-size:0.85em;color:#666;">${esc(it.Notes)}</td>
+          </tr>
+        `).join('');
+
+        return `
+          <div style="margin-bottom:20px;">
+            <h2 style="font-size:16px;margin:12px 0 8px 0;color:#333;border-bottom:2px solid #4da3ff;padding-bottom:4px;">${esc(cat)}</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th style="text-align:right;">Quantity</th>
+                  <th>Store</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      }).join('');
+
+      const html = `<!doctype html><html><head><meta charset="utf-8" />
+        <title>${esc(printTitle)}</title>
+        <style>
+          body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial;margin:24px;}
+          h1{margin:0 0 16px 0;font-size:22px;color:#111;}
+          h2{font-size:16px;margin:12px 0 8px 0;color:#333;}
+          table{width:100%;border-collapse:collapse;margin-bottom:12px;}
+          th,td{padding:6px 8px;border-bottom:1px solid #e0e0e0;vertical-align:top;text-align:left;}
+          th{color:#555;font-weight:600;background:#f5f5f5;}
+          @media print { body { margin: 12px; } }
+        </style></head><body>
+        <h1>${esc(printTitle)}</h1>
+        <div style="font-size:0.9em;color:#666;margin-bottom:16px;">Generated: ${new Date().toLocaleString()}</div>
+        ${categoryBlocks}
+        </body></html>`;
+
+      const win = new BrowserWindow({ width: 900, height: 700, show: false, webPreferences: { sandbox: false } });
+      await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+
+      return await new Promise((resolve) => {
+        win.webContents.print({ silent: false, printBackground: true }, (success, failureReason) => {
+          try { win.close(); } catch (_) { }
+          if (!success) resolve({ ok: false, error: failureReason || 'Print failed' });
+          else resolve({ ok: true });
+        });
+      });
+    } catch (e) {
+      return { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+  });
+
+  ipcMain.handle('foodie-export-data', async () => {
+    try {
+      const dbPathNow = String(store.get('dbPath') || '');
+      const source = dbPathNow || getDbPathDefault(app);
+      const res = await dialog.showSaveDialog({
+        title: 'Export Foodie data',
+        defaultPath: 'foodie.sqlite',
+        filters: [{ name: 'SQLite Database', extensions: ['sqlite', 'db'] }, { name: 'All Files', extensions: ['*'] }],
+      });
+      if (res.canceled || !res.filePath) return { ok: false, error: 'Export canceled.' };
+      require('fs').copyFileSync(source, res.filePath);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+  });
+
+  ipcMain.handle('foodie-import-data', async () => {
+    try {
+      const pick = await dialog.showOpenDialog({
+        title: 'Import Foodie data',
+        properties: ['openFile'],
+        filters: [{ name: 'SQLite Database', extensions: ['sqlite', 'db'] }, { name: 'All Files', extensions: ['*'] }],
+      });
+      if (pick.canceled || !pick.filePaths || !pick.filePaths[0]) return { ok: false, error: 'Import canceled.' };
+      const src = pick.filePaths[0];
+      const dest = String(store.get('dbPath') || '') || getDbPathDefault(app);
+      require('fs').copyFileSync(src, dest);
+      setDbPath(dest);
+      createDb();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+  });
+
+
+  // ========== PHASE 6.1: Automatic Backup System ==========
+
+  // Get backup directory path
+  function getBackupDir() {
+    const homeDir = os.homedir();
+    const backupDir = path.join(homeDir, 'Backups', 'Foodie');
+
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+    }
+
+    return backupDir;
+  }
+
+  // Create a backup
+  async function createBackup(isAuto = false) {
+    try {
+      const dbPath = String(store.get('dbPath') || '') || getDbPathDefault(app);
+      const backupDir = getBackupDir();
+
+      // Generate backup filename with timestamp
+      const timestamp = new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '');
+      const prefix = isAuto ? 'auto-backup' : 'manual-backup';
+      const backupFileName = `${prefix}-${timestamp}.sqlite`;
+      const backupPath = path.join(backupDir, backupFileName);
+
+      // Copy database file
+      fs.copyFileSync(dbPath, backupPath);
+
+      // Update last backup time
+      store.set('lastBackupTime', new Date().toISOString());
+
+      return { ok: true, backupPath, fileName: backupFileName };
+    } catch (e) {
+      return { ok: false, error: e.message || String(e) };
+    }
+  }
+
+  // List all backups
+  function listBackups() {
+    try {
+      const backupDir = getBackupDir();
+      const files = fs.readdirSync(backupDir)
+        .filter(f => f.endsWith('.sqlite'))
+        .map(f => {
+          const filePath = path.join(backupDir, f);
+          const stats = fs.statSync(filePath);
+          return {
+            fileName: f,
+            filePath,
+            size: stats.size,
+            created: stats.birthtime.toISOString(),
+            isAuto: f.startsWith('auto-backup')
+          };
+        })
+        .sort((a, b) => new Date(b.created) - new Date(a.created));
+
+      return { ok: true, backups: files };
+    } catch (e) {
+      return { ok: false, error: e.message || String(e), backups: [] };
+    }
+  }
+
+  // Clean old backups (keep last 7)
+  function cleanOldBackups() {
+    try {
+      const result = listBackups();
+      if (!result.ok) return result;
+
+      const autoBackups = result.backups.filter(b => b.isAuto);
+
+      // Keep last 7 auto backups, delete older ones
+      const toDelete = autoBackups.slice(7);
+      let deletedCount = 0;
+
+      for (const backup of toDelete) {
+        try {
+          fs.unlinkSync(backup.filePath);
+          deletedCount++;
+        } catch (e) {
+          console.error(`Failed to delete backup ${backup.fileName}:`, e);
+        }
+      }
+
+      return { ok: true, deletedCount };
+    } catch (e) {
+      return { ok: false, error: e.message || String(e) };
+    }
+  }
+
+  // Restore from backup
+  async function restoreFromBackup(backupPath) {
+    try {
+      const dbPath = String(store.get('dbPath') || '') || getDbPathDefault(app);
+
+      // Verify backup file exists
+      if (!fs.existsSync(backupPath)) {
+        return { ok: false, error: 'Backup file not found' };
+      }
+
+      // Create a safety backup of current database before restoring
+      const safetyBackupPath = path.join(getBackupDir(), `pre-restore-${Date.now()}.sqlite`);
+      fs.copyFileSync(dbPath, safetyBackupPath);
+
+      // Restore the backup
+      fs.copyFileSync(backupPath, dbPath);
+
+      // Reinitialize database
+      setDbPath(dbPath);
+      createDb();
+
+      return { ok: true, safetyBackupPath };
+    } catch (e) {
+      return { ok: false, error: e.message || String(e) };
+    }
+  }
+
+  // Check if daily backup is needed
+  function shouldRunDailyBackup() {
+    const lastBackup = store.get('lastBackupTime');
+    if (!lastBackup) return true;
+
+    const lastBackupDate = new Date(lastBackup);
+    const now = new Date();
+
+    // Check if last backup was more than 24 hours ago
+    const hoursSinceLastBackup = (now - lastBackupDate) / (1000 * 60 * 60);
+    return hoursSinceLastBackup >= 24;
+  }
+
+  // Run daily backup check
+  async function checkAndRunDailyBackup() {
+    if (shouldRunDailyBackup()) {
+      console.log('🗄️ Running daily automatic backup...');
+      const result = await createBackup(true);
+      if (result.ok) {
+        console.log(`✅ Daily backup created: ${result.fileName}`);
+        cleanOldBackups();
+      } else {
+        console.error('❌ Daily backup failed:', result.error);
+      }
+    }
+  }
+
+  // IPC handlers for backup system
+  ipcMain.handle('foodie-backup-create', async () => {
+    const result = await createBackup(false);
+    if (result.ok) {
+      cleanOldBackups(); // Clean old backups after creating new one
+    }
+    return result;
+  });
+
+  ipcMain.handle('foodie-backup-list', async () => {
+    return listBackups();
+  });
+
+  ipcMain.handle('foodie-backup-restore', async (_evt, { backupPath }) => {
+    return await restoreFromBackup(backupPath);
+  });
+
+  ipcMain.handle('foodie-backup-delete', async (_evt, { backupPath }) => {
+    try {
+      if (!fs.existsSync(backupPath)) {
+        return { ok: false, error: 'Backup file not found' };
+      }
+      fs.unlinkSync(backupPath);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message || String(e) };
+    }
+  });
+
+  ipcMain.handle('foodie-backup-get-status', async () => {
+    try {
+      const lastBackupTime = store.get('lastBackupTime') || null;
+      const backupDir = getBackupDir();
+      const result = listBackups();
+
+      return {
+        ok: true,
+        lastBackupTime,
+        backupDir,
+        backupCount: result.ok ? result.backups.length : 0,
+        autoBackupEnabled: true // Always enabled in this implementation
+      };
+    } catch (e) {
+      return { ok: false, error: e.message || String(e) };
+    }
+  });
+
+
+  // ========== END PHASE 6.1 ==========
+
+  // ========== SUPER WOW: AI Chef ==========
+  ipcMain.handle('foodie-get-env-config', async () => {
+    return {
+      openaiApiKey: process.env.OPENAI_API_KEY || ''
+    };
+  });
+
+
+  // ========== PHASE 6.2: Selective Export ==========
+
+  // Export selected recipes to JSON
+  ipcMain.handle('foodie-export-recipes', async (_evt, { recipeIds }) => {
+    try {
+      const { handleApiCall } = require('./api');
+      const recipes = [];
+
+      for (const recipeId of recipeIds) {
+        // Get recipe details
+        const recipeRes = await handleApiCall({ fn: 'getRecipe', payload: { recipeId }, store });
+        if (!recipeRes.ok) continue;
+
+        // Get recipe ingredients
+        const ingredientsRes = await handleApiCall({ fn: 'listRecipeIngredients', payload: { recipeId }, store });
+
+        recipes.push({
+          recipe: recipeRes.recipe,
+          ingredients: ingredientsRes.ok ? (ingredientsRes.items || []) : []
+        });
+      }
+
+      // Save to file
+      const res = await dialog.showSaveDialog({
+        title: 'Export Recipes',
+        defaultPath: `foodie-recipes-${new Date().toISOString().split('T')[0]}.json`,
+        filters: [{ name: 'JSON Files', extensions: ['json'] }, { name: 'All Files', extensions: ['*'] }],
+      });
+
+      if (res.canceled || !res.filePath) return { ok: false, error: 'Export canceled' };
+
+      const exportData = {
+        exportDate: new Date().toISOString(),
+        version: '1.0',
+        type: 'recipes',
+        count: recipes.length,
+        data: recipes
+      };
+
+      fs.writeFileSync(res.filePath, JSON.stringify(exportData, null, 2), 'utf-8');
+
+      return { ok: true, filePath: res.filePath, count: recipes.length };
+    } catch (e) {
+      return { ok: false, error: e.message || String(e) };
+    }
+  });
+
+  // Export collection to JSON
+  ipcMain.handle('foodie-export-collection', async (_evt, { collectionId }) => {
+    try {
+      const { handleApiCall } = require('./api');
+
+      // Get collection details
+      const collectionRes = await handleApiCall({ fn: 'getCollection', payload: { collectionId }, store });
+      if (!collectionRes.ok) return { ok: false, error: 'Collection not found' };
+
+      // Get collection recipes
+      const recipesRes = await handleApiCall({ fn: 'listCollectionRecipes', payload: { collectionId }, store });
+      if (!recipesRes.ok) return { ok: false, error: 'Failed to load collection recipes' };
+
+      const recipes = [];
+      for (const recipe of (recipesRes.recipes || [])) {
+        const ingredientsRes = await handleApiCall({ fn: 'listRecipeIngredients', payload: { recipeId: recipe.RecipeId }, store });
+        recipes.push({
+          recipe,
+          ingredients: ingredientsRes.ok ? (ingredientsRes.items || []) : []
+        });
+      }
+
+      // Save to file
+      const collectionName = (collectionRes.collection.Name || 'collection').replace(/[^a-z0-9]/gi, '-').toLowerCase();
+      const res = await dialog.showSaveDialog({
+        title: 'Export Collection',
+        defaultPath: `foodie-collection-${collectionName}-${new Date().toISOString().split('T')[0]}.json`,
+        filters: [{ name: 'JSON Files', extensions: ['json'] }, { name: 'All Files', extensions: ['*'] }],
+      });
+
+      if (res.canceled || !res.filePath) return { ok: false, error: 'Export canceled' };
+
+      const exportData = {
+        exportDate: new Date().toISOString(),
+        version: '1.0',
+        type: 'collection',
+        collection: collectionRes.collection,
+        recipeCount: recipes.length,
+        data: recipes
+      };
+
+      fs.writeFileSync(res.filePath, JSON.stringify(exportData, null, 2), 'utf-8');
+
+      return { ok: true, filePath: res.filePath, count: recipes.length };
+    } catch (e) {
+      return { ok: false, error: e.message || String(e) };
+    }
+  });
+
+  // Export meal plan (date range) to JSON
+  ipcMain.handle('foodie-export-meal-plan', async (_evt, { startDate, endDate }) => {
+    try {
+      const { handleApiCall } = require('./api');
+
+      // Get plans for date range
+      const plansRes = await handleApiCall({ fn: 'getPlansRange', payload: { start: startDate, end: endDate }, store });
+      if (!plansRes.ok) return { ok: false, error: 'Failed to load meal plans' };
+
+      const plans = plansRes.plans || [];
+      const mealPlan = [];
+
+      for (const plan of plans) {
+        const dayMeals = {
+          date: plan.Date,
+          meals: []
+        };
+
+        for (const slot of ['Breakfast', 'Lunch', 'Dinner']) {
+          const meal = plan[slot];
+          if (meal && meal.RecipeId) {
+            const ingredientsRes = await handleApiCall({ fn: 'listRecipeIngredients', payload: { recipeId: meal.RecipeId }, store });
+            dayMeals.meals.push({
+              slot,
+              recipe: meal,
+              ingredients: ingredientsRes.ok ? (ingredientsRes.items || []) : []
+            });
+          }
+        }
+
+        if (dayMeals.meals.length > 0) {
+          mealPlan.push(dayMeals);
+        }
+      }
+
+      // Save to file
+      const res = await dialog.showSaveDialog({
+        title: 'Export Meal Plan',
+        defaultPath: `foodie-meal-plan-${startDate}-to-${endDate}.json`,
+        filters: [{ name: 'JSON Files', extensions: ['json'] }, { name: 'All Files', extensions: ['*'] }],
+      });
+
+      if (res.canceled || !res.filePath) return { ok: false, error: 'Export canceled' };
+
+      const exportData = {
+        exportDate: new Date().toISOString(),
+        version: '1.0',
+        type: 'meal_plan',
+        dateRange: { start: startDate, end: endDate },
+        dayCount: mealPlan.length,
+        data: mealPlan
+      };
+
+      fs.writeFileSync(res.filePath, JSON.stringify(exportData, null, 2), 'utf-8');
+
+      return { ok: true, filePath: res.filePath, dayCount: mealPlan.length };
+    } catch (e) {
+      return { ok: false, error: e.message || String(e) };
+    }
+  });
+
+  // ========== END PHASE 6.2 ==========
+
+  // IPC: settings
+  ipcMain.handle('foodie-get-settings', async () => {
+    return {
+      ok: true,
+      dbPath: store.get('dbPath') || '',
+      calendarName: store.get('calendarName') || 'Foodie Meal Planner',
+      googleCalendarId: store.get('googleCalendarId') || 'primary',
+    };
+  });
+
+  ipcMain.handle('foodie-set-db-path', async () => {
+    // same as menu action
+    return { ok: true, dbPath: store.get('dbPath') || '' };
+  });
+
+  ipcMain.handle('foodie-set-calendar-name', async (_evt, { calendarName }) => {
+    const v = String(calendarName || '').trim() || 'Foodie Meal Planner';
+    store.set('calendarName', v);
+    return { ok: true, calendarName: v };
+  });
+
+  ipcMain.handle('foodie-set-google-calendar-id', async (_evt, { calendarId }) => {
+    const v = String(calendarId || '').trim() || 'primary';
+    store.set('googleCalendarId', v);
+    return { ok: true, calendarId: v };
+  });
+
+  // IPC: Companion server actions
+  ipcMain.handle('companion:send-shopping-list', async (_evt, payload) => {
+    console.log('📱 IPC: companion:send-shopping-list called');
+    if (!companionServer) {
+      console.error('❌ Companion server not initialized');
+      return { ok: false, error: 'Companion server not initialized' };
+    }
+    try {
+      // If items are passed from renderer, use those directly
+      const items = payload && payload.items;
+      if (items && Array.isArray(items) && items.length > 0) {
+        console.log(`📱 Sending ${items.length} items from renderer shopping list`);
+        const count = await companionServer.pushShoppingListItems(items);
+        console.log(`📱 pushShoppingListItems() returned count: ${count}`);
+        return { ok: true, count };
+      }
+      
+      // Fallback to generating from today's meals
+      console.log('📱 No items passed, calling pushShoppingListToPhones()...');
+      const count = await companionServer.pushShoppingListToPhones();
+      console.log(`📱 pushShoppingListToPhones() returned count: ${count}`);
+      return { ok: true, count };
+    } catch (e) {
+      console.error('❌ Error in pushShoppingListToPhones:', e);
+      return { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+  });
+
+  ipcMain.handle('companion:send-todays-meals', async () => {
+    console.log('📱 IPC: companion:send-todays-meals called');
+    if (!companionServer) {
+      console.error('❌ Companion server not initialized');
+      return { ok: false, error: 'Companion server not initialized' };
+    }
+    try {
+      console.log('📱 Calling pushTodaysMealsToTablets()...');
+      const count = await companionServer.pushTodaysMealsToTablets();
+      console.log(`📱 pushTodaysMealsToTablets() returned count: ${count}`);
+      return { ok: true, count };
+    } catch (e) {
+      console.error('❌ Error in pushTodaysMealsToTablets:', e);
+      return { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+  });
+
+  ipcMain.handle('companion:send-recipe', async (_evt, { recipeId }) => {
+    if (!companionServer) return { ok: false, error: 'Companion server not initialized' };
+    try {
+      const success = await companionServer.pushRecipeToTablet(recipeId);
+      return { ok: true, success };
+    } catch (e) {
+      return { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+  });
+
+  ipcMain.handle('companion:get-devices', async () => {
+    if (!companionServer) return { ok: false, error: 'Companion server not initialized', devices: [] };
+    try {
+      const devices = companionServer.getConnectedDevices();
+      return { ok: true, devices };
+    } catch (e) {
+      return { ok: false, error: e && e.message ? e.message : String(e), devices: [] };
+    }
+  });
+
+  ipcMain.handle('companion:get-server-ip', async () => {
+    try {
+      const interfaces = os.networkInterfaces();
+      const ips = [];
+
+      for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+          if (iface.family === 'IPv4' && !iface.internal) {
+            ips.push(iface.address);
+          }
+        }
+      }
+
+      return { ok: true, ip: ips[0] || null, allIps: ips };
+    } catch (e) {
+      return { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+  });
+
+  const win = await createWindow();
+
+  // Set main window reference for companion server notifications
+  if (companionServer) {
+    companionServer.setMainWindow(win);
+  }
+}
+
+app.whenReady().then(() => {
+  bootstrap().catch(err => {
+    console.error('Bootstrap failed:', err);
+    app.quit();
+  });
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('will-quit', () => {
+  if (companionServer) {
+    companionServer.stop();
+  }
+});

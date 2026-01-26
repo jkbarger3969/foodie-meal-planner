@@ -1,0 +1,193 @@
+============================================================
+API FUNCTION MISMATCH ANALYSIS
+============================================================
+Date: 2026-01-20
+
+Frontend: 70 unique API functions (157 total calls)
+Backend: 77 unique API functions
+
+============================================================
+1. FRONTEND CALLS NOT IN BACKEND (CRITICAL BUGS - WILL FAIL)
+============================================================
+
+These frontend calls will fail because they don't exist in backend:
+
+1. createCollection
+   - Frontend calls this
+   - Backend has: upsertCollection (insert OR update)
+   - IMPACT: Collection creation will fail
+   - FIX: Replace frontend call with upsertCollection
+
+2. createRecipe
+   - Frontend calls this
+   - Backend has: upsertRecipeWithIngredients (insert OR update)
+   - IMPACT: Recipe creation will fail
+   - FIX: Replace frontend call with upsertRecipeWithIngredients
+
+3. createUser
+   - Frontend calls this
+   - Backend has: createUser ✓ (EXISTS - FALSE ALARM)
+   - Note: Backend DOES have this, recheck needed
+
+4. deletePlanMeal
+   - Frontend calls this
+   - Backend has: upsertPlanMeal (for insert/update), clearMealsByRange (for deletion)
+   - IMPACT: Individual meal deletion will fail
+   - FIX: Use clearMealsByRange or add deletePlanMeal to backend
+
+5. listCuisines
+   - Frontend calls this
+   - Backend has: listUniqueCuisines, manageCuisine, autoAssignCuisines
+   - IMPACT: Listing cuisines will fail
+   - FIX: Replace with listUniqueCuisines or add listCuisines to backend
+
+6. listPlans
+   - Frontend calls this
+   - Backend has: getPlansRange
+   - IMPACT: Plan listing will fail
+   - FIX: Replace with getPlansRange
+
+7. upsertPlan
+   - Frontend calls this
+   - Backend has: upsertPlanMeal (for individual meals)
+   - IMPACT: Plan updates will fail
+   - FIX: Use upsertPlanMeal or add upsertPlan to backend
+
+CRITICAL COUNT: 7 frontend calls that will fail
+(6 confirmed bugs after verifying createUser)
+
+============================================================
+2. BACKEND FUNCTIONS NOT CALLED BY FRONTEND (UNUSED)
+============================================================
+
+These backend functions exist but are never called by frontend:
+
+1. addMealAssignment
+   - Frontend uses: setMealAssignments (bulk operation)
+   - Status: Unused individual operation
+
+2. autoAssignCuisines
+   - Automated cuisine assignment
+   - Status: Unused automation feature
+
+3. deleteCategoryOverride
+   - Category management
+   - Status: Unused feature
+
+4. getCategoryOverrides
+   - Category management
+   - Status: Unused feature
+
+5. getLowStockPantryItems
+   - Pantry monitoring
+   - Status: Unused feature
+
+6. getRecipeSuggestionsFromPantry
+   - AI/suggestion feature
+   - Status: Unused feature
+
+7. initGoogleCalendar
+   - Google Calendar initialization
+   - Status: Unused (maybe internal only)
+
+8. isUserFavorite
+   - User favorites check
+   - Status: Unused query
+
+9. listRecipesPage
+   - Paginated recipe listing
+   - Frontend uses: listRecipesAll
+   - Status: Unused pagination
+
+10. markShoppingItemPurchased
+    - Shopping list feature
+    - Status: Unused feature
+
+11. removeMealAssignment
+    - Individual meal assignment removal
+    - Frontend uses: setMealAssignments (bulk)
+    - Status: Unused individual operation
+
+12. saveCategoryOverride
+    - Category management
+    - Status: Unused feature
+
+13. searchRecipesFuzzy
+    - Search functionality
+    - Status: Unused search feature
+
+14. setIngredientCategories
+    - Ingredient categorization
+    - Status: Unused bulk operation
+
+15. toggleRecipeFavorite
+    - Recipe favorites
+    - Frontend uses: toggleUserFavorite
+    - Status: Potential confusion - check if these are different
+
+UNUSED COUNT: 15 backend functions not called by frontend
+
+============================================================
+3. POTENTIAL TYPOS OR NAMING ISSUES
+============================================================
+
+A. Different naming patterns:
+
+   Frontend          Backend            Issue
+   ----------------  -----------------  ----------------------
+   createCollection  upsertCollection   Frontend expects create, backend uses upsert
+   createRecipe      upsertRecipeWith   Frontend expects create, backend uses upsert
+                     Ingredients
+   listPlans         getPlansRange      Frontend expects list, backend uses get
+   listCuisines      listUniqueCuisines Frontend expects list, backend uses listUnique
+   deletePlanMeal    clearMealsByRange  Frontend expects delete, backend uses clear
+
+B. Potential functionality confusion:
+
+   toggleUserFavorite vs toggleRecipeFavorite
+   - Frontend calls: toggleUserFavorite
+   - Backend has both: toggleUserFavorite AND toggleRecipeFavorite
+   - Question: Are these different features or duplicate implementations?
+
+C. Missing CRUD operations:
+
+   - Frontend needs deletePlanMeal (individual)
+   - Backend only has clearMealsByRange (bulk)
+   
+   - Frontend needs upsertPlan (plan-level)
+   - Backend only has upsertPlanMeal (meal-level)
+
+============================================================
+4. RECOMMENDATIONS
+============================================================
+
+IMMEDIATE FIXES (Critical - will cause failures):
+
+1. Replace "createCollection" with "upsertCollection" in frontend
+2. Replace "createRecipe" with "upsertRecipeWithIngredients" in frontend
+3. Replace "listPlans" with "getPlansRange" in frontend
+4. Replace "listCuisines" with "listUniqueCuisines" in frontend
+5. Replace "deletePlanMeal" with "clearMealsByRange" in frontend (or add to backend)
+6. Replace "upsertPlan" with "upsertPlanMeal" in frontend (or add to backend)
+
+VERIFICATION NEEDED:
+
+1. Verify "createUser" exists in backend (appears in both lists)
+2. Clarify difference between toggleUserFavorite vs toggleRecipeFavorite
+3. Check if unused backend functions should be removed or if frontend needs them
+
+OPTIONAL CLEANUP:
+
+1. Remove unused backend functions if not needed for future features
+2. Standardize naming conventions (create vs upsert, list vs get, delete vs clear)
+3. Document which functions are internal-only vs public API
+
+============================================================
+SUMMARY
+============================================================
+
+CRITICAL: 6-7 frontend calls will fail due to missing backend handlers
+UNUSED: 15 backend functions are implemented but never called
+NAMING: 5+ naming inconsistencies between frontend expectations and backend implementation
+
+Next steps: Fix critical bugs first, then verify/cleanup unused functions.

@@ -1,0 +1,42 @@
+const path = require('path');
+const fs = require('fs');
+const { execSync } = require('child_process');
+
+exports.default = async function(context) {
+  console.log('🔧 Running afterPack script...');
+  
+  const appPath = context.appOutDir;
+  const platform = context.electronPlatformName;
+  
+  if (platform === 'darwin') {
+    const appName = context.packager.appInfo.productFilename;
+    const resourcesPath = path.join(appPath, `${appName}.app`, 'Contents', 'Resources');
+    const nodeModulesPath = path.join(resourcesPath, 'app.asar.unpacked', 'node_modules');
+    
+    console.log('📦 Rebuilding better-sqlite3 for production...');
+    console.log('   Resources path:', resourcesPath);
+    console.log('   Node modules path:', nodeModulesPath);
+    
+    // Check if better-sqlite3 exists
+    const sqlitePath = path.join(nodeModulesPath, 'better-sqlite3');
+    if (fs.existsSync(sqlitePath)) {
+      console.log('✅ Found better-sqlite3 at:', sqlitePath);
+      
+      try {
+        // Rebuild better-sqlite3 for the packaged app
+        execSync('npm rebuild better-sqlite3 --build-from-source', {
+          cwd: path.join(resourcesPath, 'app.asar.unpacked'),
+          stdio: 'inherit',
+          env: { ...process.env, npm_config_runtime: 'electron', npm_config_target: context.electronVersion }
+        });
+        console.log('✅ Successfully rebuilt better-sqlite3');
+      } catch (error) {
+        console.error('❌ Failed to rebuild better-sqlite3:', error.message);
+      }
+    } else {
+      console.warn('⚠️  better-sqlite3 not found in expected location');
+    }
+  }
+  
+  console.log('✅ afterPack script completed');
+};

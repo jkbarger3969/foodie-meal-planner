@@ -1,0 +1,45 @@
+# Environment variables (contains secrets)
+.env
+.env.local
+
+# Google Calendar credentials
+google-credentials.json
+google-token.json
+
+# Database files (user data)
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Downloaded recipe images (can be re-downloaded)
+data/images/
+
+# Backups
+Backups/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Dependency directories
+node_modules/
+
+# Build outputs
+dist/
+build/
+*.dmg
+*.zip
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Electron
+out/

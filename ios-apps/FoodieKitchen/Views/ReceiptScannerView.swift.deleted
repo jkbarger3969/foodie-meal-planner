@@ -1,0 +1,88 @@
+import SwiftUI
+import VisionKit
+import Vision
+
+struct ReceiptScannerView: UIViewControllerRepresentable {
+    @Binding var scannedItems: [String]
+    @Environment(\.presentationMode) var presentationMode
+    
+    func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
+        let scannerViewController = VNDocumentCameraViewController()
+        scannerViewController.delegate = context.coordinator
+        return scannerViewController
+    }
+    
+    func updateUIViewController(_ uiViewController: VNDocumentCameraViewController, context: Context) {}
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
+        var parent: ReceiptScannerView
+        
+        init(_ parent: ReceiptScannerView) {
+            self.parent = parent
+        }
+        
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
+            // Process the scanned page(s)
+            if scan.pageCount > 0 {
+                let image = scan.imageOfPage(at: 0)
+                recognizeText(from: image)
+            }
+            
+            parent.presentationMode.wrappedValue.dismiss()
+        }
+        
+        func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) {
+            parent.presentationMode.wrappedValue.dismiss()
+        }
+        
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) {
+            print("Document camera error: \(error)")
+            parent.presentationMode.wrappedValue.dismiss()
+        }
+        
+        private func recognizeText(from image: UIImage) {
+            guard let cgImage = image.cgImage else { return }
+            
+            let request = VNRecognizeTextRequest { [weak self] request, error in
+                guard let observations = request.results as? [VNRecognizedTextObservation], error == nil else {
+                    return
+                }
+                
+                // Extract text candidates
+                let text = observations.compactMap { $0.topCandidates(1).first?.string }
+                
+                DispatchQueue.main.async {
+                    self?.processReceiptText(text)
+                }
+            }
+            
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
+            
+            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+            try? handler.perform([request])
+        }
+        
+        private func processReceiptText(_ lines: [String]) {
+            // Simple heuristic to filter likely grocery items
+            // In a real app, this would use an LLM or more robust regex
+            let filtered = lines.filter { line in
+                let l = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                // Filter out prices, short strings, and common non-item words
+                if l.count < 3 { return false }
+                if l.starts(with: "TOTAL") { return false }
+                if l.starts(with: "TAX") { return false }
+                if l.contains("$") { return false } // Very simple price filter
+                if Double(l) != nil { return false } // Pure numbers
+                return true
+            }
+            
+            print("🧾 Scanned Items: \(filtered)")
+            parent.scannedItems = filtered
+        }
+    }
+}

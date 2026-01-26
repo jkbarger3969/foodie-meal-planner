@@ -1,0 +1,103 @@
+@import 'src/renderer/styles/main.css';
+
+/* Shopping List Styles */
+.shop-group {
+    margin-bottom: 24px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.shop-group-header {
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.shop-group-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.shop-group-count {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    background: rgba(0, 0, 0, 0.2);
+    padding: 2px 8px;
+    border-radius: 12px;
+}
+
+.shop-items {
+    padding: 8px;
+}
+
+.shop-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    transition: background 0.2s ease;
+}
+
+.shop-item:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.shop-item-check {
+    display: flex;
+    align-items: center;
+}
+
+.shop-item-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.shop-item-name {
+    font-size: 14px;
+    color: var(--text-primary);
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.shop-item-meta {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.shop-item-actions {
+    opacity: 0;
+    transform: translateX(5px);
+    transition: all 0.2s ease;
+}
+
+.shop-item:hover .shop-item-actions {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.icon-merge {
+    font-size: 12px;
+    cursor: help;
+    opacity: 0.7;
+}
+
+.btn-icon.small {
+    padding: 4px;
+    width: 28px;
+    height: 28px;
+    font-size: 14px;
+    line-height: 1;
+}

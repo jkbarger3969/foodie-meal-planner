@@ -1,0 +1,15 @@
+# AI Image Prompts
+
+If you want to generate more assets, here are the prompts I used:
+
+## 1. Pantry Mockup
+"High fidelity UI mockup of a desktop app called 'Foodie Meal Planner'. Dark theme, midnight blue background (#07090c), glassmorphism design. The screen shows a 'Pantry' view. Grid of cards, each card representing an ingredient (Milk, Eggs, Salmon, Asparagus). Each card has a small icon and a quantity. Green accent buttons. Modern, clean, professional interface. 4k resolution, highly detailed."
+
+## 2. AI Chef Mockup
+"High fidelity UI mockup of a desktop app called 'Foodie Meal Planner'. The screen shows a glowing AI Chat Interface overlay. Header says '👨‍🍳 AI Chef'. The chat history shows a user question 'What can I cook?' and an AI response suggesting a recipe. Dark theme, glassmorphism, neon green and blue accents. Modern, futuristic but clean. 4k resolution."
+
+## 3. Shopping List Mockup
+"High fidelity UI mockup of a desktop app called 'Foodie Meal Planner'. The screen shows a 'Shopping List' view. Checklist items like 'Olive Oil', 'Garlic', 'Lemon'. Dark theme, midnight blue background (#07090c). Clean, modern, glassmorphism cards. Green checkmarks. 4k resolution."
+
+## 4. B-Roll Meal
+"Professional food photography of Grilled Salmon with Asparagus on a beautiful ceramic plate. Soft lighting, restaurant quality, steam rising, delicious, high detail, 8k resolution. Cinematic lighting."

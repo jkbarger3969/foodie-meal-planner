@@ -1,0 +1,2653 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0b0f14; --card:#121926; --muted:#8aa0b6; --text:#e8eef6; --accent:#4da3ff; --danger:#ff6b6b; --line:rgba(255,255,255,0.10); }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background: var(--bg); color: var(--text); }
+    header { padding: 14px 16px; border-bottom: 1px solid var(--line); position: sticky; top:0; background: rgba(11,15,20,0.92); backdrop-filter: blur(8px); z-index: 50; }
+    h1 { font-size: 16px; margin:0; }
+    .muted { color: var(--muted); font-size: 12px; }
+    .wrap { padding: 14px; max-width: 1200px; margin: 0 auto; }
+    .tabs { display:flex; gap:8px; flex-wrap: wrap; margin-top: 10px; }
+    .tab { padding: 8px 10px; border-radius: 999px; border:1px solid var(--line); background: rgba(255,255,255,0.03); cursor:pointer; font-size: 13px; }
+    .tab.active { background: rgba(77,163,255,0.22); border-color: rgba(77,163,255,0.55); }
+    .grid { display:grid; grid-template-columns: 1fr; gap: 12px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; box-shadow: 0 8px 20px rgba(0,0,0,0.25); }
+    .row { display:grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap:10px; align-items:end; }
+    .row.align-top { align-items:start; }
+
+    .col-12{grid-column:span 12} .col-8{grid-column:span 12} .col-6{grid-column:span 12} .col-4{grid-column:span 12} .col-3{grid-column:span 12} .col-2{grid-column:span 12}
+    @media (min-width: 720px){ .col-8{grid-column:span 8} .col-6{grid-column:span 6} .col-4{grid-column:span 4} .col-3{grid-column:span 3} .col-2{grid-column:span 2} }
+    label { font-size:12px; color: var(--muted); display:block; margin-bottom:6px; }
+    input, select, textarea {
+      width: 100%; padding: 10px 10px; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.04); color: var(--text);
+      box-sizing: border-box; min-height: 42px; color-scheme: dark;
+    }
+    textarea { min-height: 90px; resize: vertical; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    button { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: rgba(77,163,255,0.18); color: var(--text); cursor:pointer; }
+    button.primary { background: var(--accent); color: #06111f; font-weight: 700; border: none; }
+    button.ghost { background: rgba(255,255,255,0.04); }
+    button.danger { background: rgba(255,107,107,0.18); border-color: rgba(255,107,107,0.30); }
+    button:disabled { opacity: 0.5; cursor:not-allowed; }
+    .hr { height:1px; background: var(--line); margin: 12px 0; }
+    .list { display:flex; flex-direction:column; gap:10px; }
+    .item { padding:10px; border-radius:12px; border:1px solid var(--line); background: rgba(255,255,255,0.03); }
+    .pill { display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; border:1px solid rgba(255,255,255,0.12); margin-right:6px; }
+    .pill.accent { border-color: rgba(77,163,255,0.55); background: rgba(77,163,255,0.14); }
+    a { color: var(--accent); text-decoration: none; }
+
+    details { border: 1px solid var(--line); border-radius: 14px; padding: 10px; background: rgba(255,255,255,0.02); }
+    summary { cursor:pointer; user-select:none; font-weight:700; }
+    summary::-webkit-details-marker { display:none; }
+    summary:before { content:"▶"; display:inline-block; margin-right:8px; color: rgba(255,255,255,0.7); transform: translateY(-1px); }
+    details[open] summary:before { content:"▼"; }
+
+    .modalBack { position: fixed; inset:0; background: rgba(0,0,0,0.55); display:none; align-items:center; justify-content:center; padding: 16px; z-index: 100; }
+    
+    /* Ensure the Recipe modal appears above the Meal Picker when both are open */
+    #recipeModalBack { z-index: 110; }
+    #mealPickerBack { z-index: 100; }
+
+    .modal { width: min(1020px, 100%); background: var(--card); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; padding: 14px; box-shadow: 0 16px 40px rgba(0,0,0,0.45); max-height: 92vh; overflow:auto; }
+    .modalHead { display:flex; justify-content:space-between; align-items:center; gap:10px; position: sticky; top: 0; background: var(--card); padding-bottom: 8px; z-index: 2; }
+    .storeBadge { display:inline-block; padding:3px 8px; border-radius:999px; font-size:12px; border:1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.03); color: var(--text); margin-left:8px; }
+    .mini { font-size: 12px; padding: 7px 10px; border-radius: 10px; }
+  
+.ingGrid select, .ingGrid input { width:100%; box-sizing:border-box; }
+.ingGrid .row { align-items:flex-end; }
+
+/* Letter headers for recipe list - NOT sticky */
+.letter-header {
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  background: #1a4d7c;
+  border-bottom: 2px solid var(--accent);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  margin-top: 16px;
+}
+
+/* Ensure recipe items don't overlap sticky headers */
+#recipesList .item {
+  position: relative;
+  z-index: 1;
+}
+
+/* Recipe scaling controls */
+.scale-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, rgba(77,163,255,0.15) 0%, rgba(77,163,255,0.05) 100%);
+  border: 1px solid rgba(77,163,255,0.4);
+  border-radius: 10px;
+  margin-bottom: 14px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+}
+.scale-controls label {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.scale-controls button {
+  padding: 8px 14px;
+  font-size: 16px;
+  font-weight: 600;
+  background: rgba(77,163,255,0.25);
+  border: 1px solid rgba(77,163,255,0.5);
+  border-radius: 6px;
+  min-width: 40px;
+  color: var(--accent);
+}
+.scale-controls button:hover {
+  background: rgba(77,163,255,0.4);
+}
+.scale-value {
+  font-weight: 700;
+  min-width: 50px;
+  text-align: center;
+  font-size: 18px;
+  color: var(--accent);
+  text-shadow: 0 0 10px rgba(77,163,255,0.5);
+}
+
+/* Auto-classification indicator */
+.auto-cat-indicator {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 4px;
+}
+.auto-cat-active {
+  color: #22c55e;
+}
+</style>
+</head>
+<body>
+  <header>
+    <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
+      <div>
+        <h1>Foodie Meal Planner</h1>
+        <div class="muted">Local desktop app (Planner + Bulk Planner + Recipes + Shopping List + Pantry + Admin) • SQLite + Apple Calendar</div>
+      </div>
+      <div class="muted" id="topStatus"></div>
+    </div>
+    <div class="tabs" id="tabs">
+      <div class="tab active" data-tab="planner">Planner</div>
+<div class="tab" data-tab="recipes">Recipes</div>
+      <div class="tab" data-tab="shop">Shopping List</div>
+      <div class="tab" data-tab="pantry">Pantry</div>
+      <div class="tab" data-tab="admin">Admin</div>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <!-- PLANNER -->
+    <section id="tab-planner" class="grid">
+      <div class="card">
+        <h2 style="margin:0 0 8px 0; font-size:16px;">Planner</h2>
+        <div class="muted">Set meals per day. Pick/replace and clear meals. (Uses plans/{YYYY-MM-DD})</div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="col-4">
+            <label>Start date</label>
+            <input type="date" id="planStart">
+          </div>
+          <div class="col-4">
+            <label>End date</label>
+            <input type="date" id="planEnd">
+            <input type="number" id="planDays" min="1" max="60" value="1" style="display:none;">
+          </div>
+          <div class="col-4">
+            <label>Actions</label>
+            <div class="actions">
+              <button class="primary" id="btnPlanLoad">Load</button>
+              <button class="ghost" id="btnPlanCollapseAll">Collapse all</button>
+              <button class="ghost" id="btnPlanExpandAll">Expand all</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+        <div id="planList" class="list"></div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin:0 0 8px 0; font-size:16px;">Calendar Sync</h2>
+        <div class="muted">Sync planned meals to Apple Calendar (macOS). The app will ask for permission the first time.</div>
+        <div class="hr"></div>
+
+        <div class="row align-top">
+          <div class="col-6">
+            <label>Calendar name</label>
+            <input id="calId" value="Foodie Meal Planner">
+            <div class="muted">Enter the Apple Calendar name exactly as it appears in the Calendar app.</div>
+          </div>
+          <div class="col-6">
+            <label>Range</label>
+            <div class="actions">
+              <button class="primary" id="btnCalSync">Sync current range</button>
+            </div>
+            <div class="muted" id="calStatus"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- BULK PLANNER -->
+    <section id="tab-bulk" class="grid" style="display:none;">
+      <div class="card">
+        <h2 style="margin:0 0 8px 0; font-size:16px;">Bulk Planner</h2>
+        <div class="muted">Same data as Planner, but optimized for quick multi-day planning and swapping.</div>
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="col-4">
+            <label>Start date</label>
+            <input type="date" id="bulkStart">
+          </div>
+          <div class="col-4">
+            <label>End date</label>
+            <input type="date" id="bulkEnd">
+            <input type="number" id="bulkDays" min="1" max="60" value="14" style="display:none;">
+          </div>
+          <div class="col-4">
+            <label>Actions</label>
+            <div class="actions">
+              <button class="primary" id="btnBulkLoad">Load</button>
+              <button class="ghost" id="btnBulkCollapseAll">Collapse all</button>
+              <button class="ghost" id="btnBulkExpandAll">Expand all</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+        <div id="bulkList" class="list"></div>
+      </div>
+    </section>
+
+    <!-- RECIPES -->
+    <section id="tab-recipes" class="grid" style="display:none;">
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+          <h2 style="margin:0; font-size:16px;">Recipe Manager</h2>
+          <div>
+            <span class="pill accent" id="pillCount">Loaded: 0</span>
+            <span class="pill" id="pillMode">Local search</span>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="col-12">
+            <label>Search recipes (searches the entire collection; not just loaded ones)</label>
+            <input id="recipeSearch" placeholder="Type to search..." />
+            <div class="muted" id="recipeStatus" style="margin-top:6px;"></div>
+          </div>
+
+          <div class="col-12">
+            <div class="actions">
+              <button class="primary" id="btnAddRecipe">Add Recipe</button>
+              <button class="ghost" id="btnRefresh">Reset</button>
+              <select id="jumpLetter" class="mini">
+                <option value="">Jump A–Z</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="list" id="recipesList" style="max-height: 650px; overflow:auto;"></div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin:0 0 8px 0; font-size:16px;">Stores</h2>
+        <div class="muted">Stores appear in ingredient Store dropdown. Add a store and it will be available immediately. Use the Delete button to remove stores.</div>
+        <div class="hr"></div>
+        
+        <h3 style="margin:12px 0 8px 0;font-size:14px;font-weight:600;">Add New Store</h3>
+        <div class="row">
+          <div class="col-8">
+            <label>Store name</label>
+            <input id="newStoreName" placeholder="e.g., Costco">
+          </div>
+          <div class="col-4">
+            <label>Priority (lower = earlier)</label>
+            <input id="newStorePriority" type="number" value="10">
+          </div>
+          <div class="col-12">
+            <div class="actions">
+              <button class="primary" id="btnAddStore">Add Store</button>
+              <button class="ghost" id="btnReloadStores">Reload</button>
+              <span class="muted" id="storeStatus"></span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="hr"></div>
+        
+        <h3 style="margin:12px 0 8px 0;font-size:14px;font-weight:600;">Existing Stores</h3>
+        <div id="storeList" class="list"></div>
+      </div>
+    </section>
+
+    <!-- SHOPPING LIST -->
+    <section id="tab-shop" class="grid" style="display:none;">
+      <div class="card">
+        <h2 style="margin:0 0 8px 0; font-size:16px;">Shopping List</h2>
+        <div class="muted">Generates from planned meals in a date range.</div>
+        <div class="hr"></div>
+        <div class="row">
+          <div class="col-4">
+            <label>Start</label>
+            <input type="date" id="shopStart">
+          </div>
+          <div class="col-4">
+            <label>Days</label>
+            <input type="number" id="shopDays" min="1" max="60" value="14">
+          </div>
+          <div class="col-4">
+            <label>Action</label>
+            <div class="actions">
+              <button class="primary" id="btnBuildShop">Generate</button>
+              <button class="ghost" id="btnPrintShopAll">Print all stores</button>
+              <button class="danger" id="btnClearShop">Clear list</button>
+            </div>
+          </div>
+        </div>
+        <div class="hr"></div>
+        <div id="shopOut" class="list"></div>
+      </div>
+    </section>
+
+    <!-- PANTRY -->
+    <section id="tab-pantry" class="grid" style="display:none;">
+      <div class="card">
+        <h2 style="margin:0 0 8px 0; font-size:16px;">Pantry</h2>
+        <div class="muted">Simple pantry tracker (add/edit/remove).</div>
+        <div class="hr"></div>
+        <div class="row">
+          <div class="col-6">
+            <label>Search pantry</label>
+            <input id="pantrySearch" placeholder="e.g., rice">
+          </div>
+          <div class="col-6">
+            <label>Actions</label>
+            <div class="actions">
+              <button class="primary" id="btnPantryAdd">Add item</button>
+              <button class="ghost" id="btnPantryRefresh">Refresh</button>
+            </div>
+          </div>
+        </div>
+        <div class="hr"></div>
+        <div id="pantryList" class="list"></div>
+      </div>
+    </section>
+
+    <!-- ADMIN -->
+    <section id="tab-admin" class="grid" style="display:none;">
+      <div class="card" id="adminIngredientCategories" style="margin-top:12px;">
+        <h2 style="margin:0 0 8px 0;">Ingredient Categories</h2>
+        <div class="muted" style="margin-bottom:8px;">
+          These categories populate the Category dropdown on recipe ingredients and control shopping list category ordering.
+          Existing ingredients keep their current Category text even if you remove a category from this list.
+        </div>
+        <label>One category per line</label>
+        <textarea id="adminCategoriesText" rows="8" style="width:100%;"></textarea>
+        <div class="actions" style="margin-top:8px;">
+          <button id="btnSaveIngredientCategories" class="primary">Save Categories</button>
+          <button id="btnResetIngredientCategories">Reset to Defaults</button>
+        </div>
+        <div class="muted" id="adminCategoriesStatus" style="margin-top:6px;"></div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin:0 0 8px 0; font-size:16px;">Admin</h2>
+        <div class="muted">Import/Export your data to sync across multiple installations.</div>
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="col-12">
+            <label>Data sync</label>
+            <div class="actions">
+              <button class="primary" id="btnExportData">Export data…</button>
+              <button class="ghost" id="btnImportData">Import data…</button>
+              <span class="muted" id="adminStatus"></span>
+            </div>
+            <div class="muted" style="margin-top:8px;">
+              Export creates a copy of your sqlite database. Import replaces your current local database with the selected file.
+            </div>
+          </div>
+        </div>
+        
+        <div class="hr"></div>
+        
+        <div class="row">
+          <div class="col-12">
+            <label>Recipe Categories</label>
+            <div class="actions">
+              <button class="ghost" id="btnFixCategories" style="border-color: var(--accent); color: var(--accent);">Fix All Recipe Categories</button>
+              <span class="muted" id="fixCategoriesStatus"></span>
+            </div>
+            <div class="muted" style="margin-top:8px;">
+              Re-categorize all ingredients in all recipes and save to database. Use this if shopping list categories aren't working.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- RECIPE MODAL -->
+  <div class="modalBack" id="recipeModalBack">
+    <div class="modal">
+      <div class="modalHead">
+        <div>
+          <div style="font-weight:700;" id="rmTitle">Recipe</div>
+          <div class="muted" id="rmSub">View/Edit recipe + instructions + ingredients.</div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="btnModalToggleEdit">Edit</button>
+          <button class="ghost" id="btnModalClose">Close</button>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-12">
+          <label>Recipe title</label>
+          <input id="rTitle" placeholder="e.g., Cold Sesame Noodles">
+        </div>
+
+        <div class="col-12">
+          <label>Recipe URL</label>
+          <input id="rUrl" placeholder="https://...">
+          <div class="muted" id="rUrlView" style="margin-top:6px;"></div>
+        </div>
+
+        <div class="col-6">
+          <label>Cuisine</label>
+          <select id="rCuisine"></select>
+        </div>
+
+        <div class="col-6">
+          <label>MealType</label>
+          <select id="rMealType">
+            <option value="Any">Any</option>
+            <option value="Breakfast">Breakfast</option>
+            <option value="Lunch">Lunch</option>
+            <option value="Dinner">Dinner</option>
+          </select>
+        </div>
+
+        <div class="col-12">
+          <label>Instructions</label>
+          <textarea id="rInstructions" placeholder="Step-by-step..."></textarea>
+        </div>
+
+        <div class="col-12">
+          <label>Notes</label>
+          <textarea id="rNotes" placeholder="Any notes"></textarea>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <!-- Recipe Scaling Controls - Always Visible -->
+      <div class="scale-controls" id="scaleControls">
+        <label>Scale Recipe:</label>
+        <button class="ghost" data-action="scale-down" title="Decrease serving size">−</button>
+        <span class="scale-value" id="scaleValue">1.0x</span>
+        <button class="ghost" data-action="scale-up" title="Increase serving size">+</button>
+        <button class="ghost" data-action="scale-reset" title="Reset to original">Reset</button>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+        <div>
+          <div style="font-weight:700;">Ingredients <span class="muted" style="font-weight:400;font-size:12px;">(Type name to auto-categorize)</span></div>
+          <div class="muted">We show a clean "Ingredient" input (raw). Normalized is hidden by default for UX.</div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="btnCategorizeAll" title="Categorize all uncategorized ingredients">Categorize All</button>
+          <button class="ghost" id="btnAddIngredientRow">Add row</button>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+      <div id="ingTableWrap"></div>
+
+      <div class="hr"></div>
+
+      <div class="actions" id="modalActions">
+        <button class="primary" id="btnPrintRecipe">Print Recipe</button>
+        <button class="primary" id="btnSaveRecipeFull">Save Recipe + Ingredients</button>
+        <button class="danger" id="btnDeleteRecipe">Delete Recipe</button>
+        <span class="muted" id="rmStatus"></span>
+      </div>
+
+      <!-- View Mode Actions (visible only in view mode) -->
+      <div class="actions" id="viewModeActions" style="display:none;">
+        <button class="primary" id="btnPrintRecipeView">Print Recipe</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MEAL PICKER MODAL -->
+  <div class="modalBack" id="mealPickerBack">
+    <div class="modal">
+      <div class="modalHead">
+        <div>
+          <div style="font-weight:700;" id="mpTitle">Pick a recipe</div>
+          <div class="muted" id="mpSub"></div>
+        </div>
+        <div class="actions">
+          <button class="ghost" id="btnMealPickerClose">Close</button>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="col-12">
+          <label>Search recipes</label>
+          <input id="mpSearch" placeholder="type to search...">
+          <div class="muted" id="mpStatus" style="margin-top:6px;"></div>
+        </div>
+        <div class="col-12">
+          <div class="actions">
+            <button class="danger" id="mpClearMeal">Clear meal</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+      <div id="mpList" class="list" style="max-height: 70vh; overflow:auto;"></div>
+    </div>
+  </div>
+
+  <script>
+    // ---------- utilities ----------
+    function api(fn, payload) {
+      return window.Foodie.api(fn, payload);
+    }
+
+    // ---------- META / common options ----------
+    const DEFAULT_ING_CATEGORIES = ['Produce','Dairy','Meat','Seafood','Pantry','Snacks','Frozen','Bakery','Deli','Beverages','Household','Spice','Other'];
+
+    const META = {
+      qtyNumOptions: ['', '0.25','0.5','0.75','1','1.5','2','3','4','5','6','8','10','12'],
+      unitOptions: ['', 'tsp','tbsp','cup','oz','lb','g','kg','ml','l','pinch','clove','can','jar','package','bunch','slice','piece'],
+      categories: [''].concat(DEFAULT_ING_CATEGORIES)
+    };
+
+    function optionHtml_(vals, selected){
+      const s = String(selected ?? '');
+      const list = Array.isArray(vals) ? vals.slice() : [];
+      if (s && !list.some(v => String(v) === s)) list.push(s);
+      return (list || []).map(v => {
+        const vv = String(v);
+        return `<option value="${escapeAttr(vv)}"${vv===s ? ' selected' : ''}>${escapeHtml(vv)}</option>`;
+      }).join('');
+    }
+
+    function ensureDatalist_(id, values){
+      let dl = document.getElementById(id);
+      if (!dl) {
+        dl = document.createElement('datalist');
+        dl.id = id;
+        document.body.appendChild(dl);
+      }
+      dl.innerHTML = (values||[]).map(v => `<option value="${escapeAttr(String(v))}"></option>`).join('');
+      return dl;
+    }
+    async function pantryModal_(opts){
+      const overlay = document.getElementById('pantryModalOverlay');
+      const titleEl = document.getElementById('pantryModalTitle');
+      const btnClose = document.getElementById('pantryModalClose');
+      const btnCancel = document.getElementById('pantryModalCancel');
+      const btnSave = document.getElementById('pantryModalSave');
+      const errEl = document.getElementById('pantryModalError');
+
+      const nameEl = document.getElementById('pantryModalName');
+      const qtyNumEl = document.getElementById('pantryModalQtyNum');
+      const unitEl = document.getElementById('pantryModalUnit');
+      const categoryEl = document.getElementById('pantryModalCategory');
+      const qtyTextEl = document.getElementById('pantryModalQtyText');
+      const storeIdEl = document.getElementById('pantryModalStoreId');
+      const notesEl = document.getElementById('pantryModalNotes');
+
+      titleEl.textContent = (opts && opts.title) ? String(opts.title) : 'Pantry Item';
+      const init = (opts && opts.initial) ? opts.initial : {};
+
+      // populate datalists with common options
+      ensureDatalist_('dlPantryQtyNum', META.qtyNumOptions);
+      ensureDatalist_('dlPantryUnit', META.unitOptions);
+      qtyNumEl.setAttribute('list', 'dlPantryQtyNum');
+      unitEl.setAttribute('list', 'dlPantryUnit');
+
+      // category options mirror ingredient categories
+      if (categoryEl) {
+        categoryEl.innerHTML = optionHtml_(META.categories, String(init.Category || ''));
+        categoryEl.value = String(init.Category || '');
+      }
+
+      nameEl.value = String(init.Name || '');
+      qtyNumEl.value = (init.QtyNum === null || init.QtyNum === undefined) ? '' : String(init.QtyNum);
+      unitEl.value = String(init.Unit || '');
+      if (categoryEl) categoryEl.value = String(init.Category || '');
+      qtyTextEl.value = String(init.QtyText || '');
+      storeIdEl.value = String(init.StoreId || '');
+      notesEl.value = String(init.Notes || '');
+      errEl.textContent = '';
+
+      overlay.style.display = 'flex';
+
+      return await new Promise((resolve) => {
+        function close_(res){
+          overlay.style.display = 'none';
+          btnClose.removeEventListener('click', onCancel);
+          btnCancel.removeEventListener('click', onCancel);
+          btnSave.removeEventListener('click', onSave);
+          resolve(res);
+        }
+        function onCancel(){ close_({ ok:false, cancelled:true }); }
+        async function onSave(){
+          const name = String(nameEl.value||'').trim();
+          if (!name) { errEl.textContent = 'Name is required.'; return; }
+          const qtyNum = qtyNumEl.value === '' ? null : Number(qtyNumEl.value);
+          if (qtyNumEl.value !== '' && !Number.isFinite(qtyNum)) { errEl.textContent = 'Qty number must be numeric.'; return; }
+          const payload = {
+            ItemId: init.ItemId || init.PantryId || null,
+            Name: name,
+            QtyNum: qtyNum,
+            Unit: String(unitEl.value||'').trim(),
+            Category: categoryEl ? String(categoryEl.value||'').trim() : '',
+            QtyText: String(qtyTextEl.value||'').trim(),
+            StoreId: String(storeIdEl.value||'').trim(),
+            Notes: String(notesEl.value||'').trim(),
+          };
+          const r = await api('upsertPantryItem', payload);
+          if (!r.ok) { errEl.textContent = r.error || 'Save error'; return; }
+          close_({ ok:true });
+        }
+
+        btnClose.addEventListener('click', onCancel);
+        btnCancel.addEventListener('click', onCancel);
+        btnSave.addEventListener('click', onSave);
+      });
+    }
+
+function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+    function escapeAttr(s){ return escapeHtml(s).replace(/"/g,'&quot;'); }
+
+    // Debounce utility for auto-categorization
+    function debounce(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        const later = () => {
+          clearTimeout(timeout);
+          func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    }
+
+    function ymd(d){
+      const dt = (d instanceof Date) ? d : new Date(d);
+      const y = dt.getFullYear();
+      const m = String(dt.getMonth()+1).padStart(2,'0');
+      const da = String(dt.getDate()).padStart(2,'0');
+      return `${y}-${m}-${da}`;
+    }
+    function addDays(dateYmd, days){
+      const [y,m,d] = dateYmd.split('-').map(Number);
+      const dt = new Date(y, m-1, d);
+      dt.setDate(dt.getDate() + Number(days||0));
+      return ymd(dt);
+    }
+
+    function daysInclusive(startYmd, endYmd){
+      if (!startYmd || !endYmd) return 0;
+      const [sy,sm,sd] = String(startYmd).split('-').map(Number);
+      const [ey,em,ed] = String(endYmd).split('-').map(Number);
+      const s = new Date(sy, sm-1, sd);
+      const e = new Date(ey, em-1, ed);
+      const diff = Math.floor((e - s) / (24*60*60*1000));
+      return diff + 1;
+    }
+
+    // ---------- global state ----------
+    let STORES = [];
+    let STORE_ID_TO_NAME = {};
+    let RECIPES = [];
+    let CURRENT_QUERY = '';
+    let LOADING = false;
+
+    // modal state (recipes)
+    let CURRENT_RECIPE_ID = '';
+    let ING_ROWS = [];
+    let recipeModalMode = 'view'; // view|edit|new
+    
+    // Recipe scaling state
+    let RECIPE_SCALE = 1.0;
+    let RECIPE_BASE_SERVINGS = 4; // Default base servings
+    let RECIPE_ORIGINAL_ING_ROWS = []; // Store original quantities for scaling
+
+    // Auto-categorization debounce timer
+    let autoCatDebounceTimer = null;
+
+    // meal picker state
+    let MP = { open:false, date:'', slot:'', q:'', recipes:[] };
+
+    // planner state
+    let PLAN = { start:'', days:14, plansByDate:{} };
+
+    // admin state
+    let BF = { token:'', totalUpdated:0, totalScanned:0 };
+    let CL = { token:'', totalDeleted:0, totalScanned:0 };
+
+    // ---------- tabbing ----------
+    function setTab(tabName){
+      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
+      document.querySelectorAll('section[id^="tab-"]').forEach(s => s.style.display = 'none');
+      document.getElementById('tab-' + tabName).style.display = '';
+    }
+    document.getElementById('tabs').addEventListener('click', (e) => {
+      const t = e.target.closest('.tab');
+      if (!t) return;
+      setTab(t.dataset.tab);
+    });
+
+    // ---------- stores ----------
+    async function loadStores() {
+      const res = await api('listStores', {});
+      if (!res.ok) throw new Error(res.error || 'listStores failed');
+      STORES = res.stores || [];
+      STORE_ID_TO_NAME = {};
+      for (const s of STORES) STORE_ID_TO_NAME[String(s.StoreId)] = String(s.Name || '');
+      renderStoreList();
+    }
+    function getStoreNameById(id) { return STORE_ID_TO_NAME[String(id||'')] || ''; }
+
+    // Get default store ID for Kroger (used for ingredient defaults)
+    function getDefaultStoreId() {
+      const k = (STORES || []).find(s => String(s.Name||'').trim().toLowerCase() === 'kroger');
+      return k ? String(k.StoreId) : '';
+    }
+
+    function renderStoreList(){
+      const box = document.getElementById('storeList');
+      if (!box) return;
+      if (!STORES.length) { box.innerHTML = `<div class="muted">No stores yet. Add one above.</div>`; return; }
+      box.innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;padding:8px 10px;font-size:12px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);margin-bottom:4px;">
+          <div>STORE NAME</div>
+          <div>ACTION</div>
+        </div>
+        ${STORES.map(s => `
+          <div class="item" style="display:grid;grid-template-columns:1fr auto;gap:10px;padding:10px 10px;align-items:center;">
+            <div>
+              <strong>${escapeHtml(s.Name)}</strong>
+              <span class="muted" style="margin-left:8px;">(${escapeHtml(s.StoreId)})</span>
+            </div>
+            <button class="danger" data-action="store-delete" data-storeid="${escapeAttr(s.StoreId)}" data-storename="${escapeAttr(s.Name)}" style="padding:6px 10px;font-size:12px;">Delete</button>
+          </div>
+        `).join('')}
+      `;
+    }
+
+    // ---------- recipes (local: load all, no pagination) ----------
+    async function resetAndLoadRecipes() {
+      if (LOADING) return;
+      LOADING = true;
+      try {
+        document.getElementById('recipeStatus').textContent = 'Loading...';
+        const res = await api('listRecipesAll', { q: CURRENT_QUERY });
+        if (!res.ok) throw new Error(res.error || 'listRecipesAll failed');
+        RECIPES = res.recipes || [];
+        RECIPES.sort((a,b) => String(a.TitleLower||a.Title||'').localeCompare(String(b.TitleLower||b.Title||'')));
+        renderRecipes();
+        document.getElementById('pillCount').textContent = `Loaded: ${RECIPES.length}`;
+        document.getElementById('recipeStatus').textContent = RECIPES.length ? 'Loaded.' : 'No matches.';
+      } catch (e) {
+        document.getElementById('recipeStatus').textContent = `Error: ${String(e && e.message ? e.message : e)}`;
+      } finally {
+        LOADING = false;
+      }
+    }
+
+    function renderRecipes() {
+      const box = document.getElementById('recipesList');
+      if (!RECIPES.length) {
+        box.innerHTML = `<div class="muted">No recipes loaded.</div>`;
+        return;
+      }
+
+      // Group recipes by first letter with anchor IDs
+      const letterGroups = {};
+      RECIPES.forEach(r => {
+        const title = r.Title || '';
+        const firstLetter = title.charAt(0).toUpperCase();
+        const key = firstLetter.match(/[A-Z]/) ? firstLetter : '#';
+        if (!letterGroups[key]) letterGroups[key] = [];
+        letterGroups[key].push(r);
+      });
+
+      // Render in order: A-Z, then # for non-letter starts
+      const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+      const sortedKeys = [...letters.filter(l => letterGroups[l]), ...(letterGroups['#'] ? ['#'] : [])];
+
+      box.innerHTML = sortedKeys.map(letter => `
+        <div id="letter-${letter.toLowerCase()}">
+          <div class="letter-header">
+            ${letter === '#' ? 'Other' : letter}
+          </div>
+          ${letterGroups[letter].map(r => `
+            <div class="item">
+              <div style="display:flex; justify-content:space-between; gap:10px; align-items:start;">
+                <div style="flex:1;">
+                  <div><strong>${escapeHtml(r.Title || '')}</strong></div>
+                  <div class="muted">${escapeHtml(r.MealType || 'Any')} • ${escapeHtml(r.Cuisine || '')}</div>
+                  <div class="muted">${r.URL ? `<a href="${escapeAttr(r.URL)}" target="_blank" rel="noreferrer">open link</a>` : ''}</div>
+                </div>
+                <div class="actions">
+                  <button class="ghost" data-action="recipe-view" data-rid="${escapeAttr(r.RecipeId)}">View</button>
+                  <button class="ghost" data-action="recipe-edit" data-rid="${escapeAttr(r.RecipeId)}">Edit</button>
+                  <button class="ghost" data-action="recipe-print" data-rid="${escapeAttr(r.RecipeId)}">Print</button>
+                </div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      `).join('');
+    }
+
+    // ---------- recipe modal ----------
+    function openRecipeModal() { document.getElementById('recipeModalBack').style.display = 'flex'; }
+    function closeRecipeModal() { 
+      document.getElementById('recipeModalBack').style.display = 'none'; 
+      // Reset scale when closing modal
+      resetRecipeScale();
+    }
+
+    function setRecipeModalMode(mode) {
+      recipeModalMode = mode;
+      const editable = (mode === 'edit' || mode === 'new');
+
+      document.getElementById('rmTitle').textContent =
+        mode === 'view' ? 'View Recipe' : (mode === 'new' ? 'Add Recipe' : 'Edit Recipe');
+      document.getElementById('btnModalToggleEdit').textContent = (mode === 'view') ? 'Edit' : 'View';
+
+      ['rTitle','rUrl','rCuisine','rMealType','rInstructions','rNotes'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !editable;
+      });
+
+      document.getElementById('modalActions').style.display = editable ? '' : 'none';
+      document.getElementById('viewModeActions').style.display = editable ? 'none' : '';
+
+      const url = (document.getElementById('rUrl').value || '').trim();
+      document.getElementById('rUrlView').innerHTML = url ? `<a href="${escapeAttr(url)}" target="_blank" rel="noreferrer">Open recipe link</a>` : '';
+
+      renderIngredientsTable();
+    }
+
+    function toggleRecipeModalMode() {
+      if (recipeModalMode === 'view') setRecipeModalMode('edit');
+      else setRecipeModalMode('view');
+    }
+
+    async function openRecipeModalNew() {
+      CURRENT_RECIPE_ID = '';
+      document.getElementById('rTitle').value = '';
+      document.getElementById('rUrl').value = '';
+      setCuisineSelect_('');
+      document.getElementById('rMealType').value = 'Any';
+      document.getElementById('rNotes').value = '';
+      document.getElementById('rInstructions').value = '';
+      ING_ROWS = [];
+      RECIPE_ORIGINAL_ING_ROWS = [];
+      RECIPE_SCALE = 1.0;
+      updateScaleDisplay();
+      openRecipeModal();
+      setRecipeModalMode('new');
+    }
+
+    async function openRecipeModalView(recipeId) {
+      const res = await api('getRecipe', { recipeId });
+      if (!res.ok) { alert(res.error || 'Failed'); return; }
+      const r = res.recipe || {};
+      CURRENT_RECIPE_ID = r.RecipeId || '';
+
+      document.getElementById('rTitle').value = r.Title || '';
+      document.getElementById('rUrl').value = r.URL || '';
+      setCuisineSelect_(r.Cuisine || '');
+      document.getElementById('rMealType').value = r.MealType || 'Any';
+      document.getElementById('rNotes').value = r.Notes || '';
+      document.getElementById('rInstructions').value = r.Instructions || '';
+
+      await loadIngredientsForCurrentRecipe();
+
+      openRecipeModal();
+      setRecipeModalMode('view');
+    }
+
+    async function openRecipeModalEdit(recipeId) {
+      await openRecipeModalView(recipeId);
+      setRecipeModalMode('edit');
+    }
+
+    async function loadIngredientsForCurrentRecipe() {
+      ING_ROWS = [];
+      if (!CURRENT_RECIPE_ID) { 
+        RECIPE_ORIGINAL_ING_ROWS = [];
+        RECIPE_SCALE = 1.0;
+        updateScaleDisplay();
+        renderIngredientsTable(); 
+        return; 
+      }
+
+      const res = await api('listRecipeIngredients', { recipeId: CURRENT_RECIPE_ID });
+      if (!res.ok) { 
+        RECIPE_ORIGINAL_ING_ROWS = [];
+        RECIPE_SCALE = 1.0;
+        updateScaleDisplay();
+        renderIngredientsTable(); 
+        return; 
+      }
+
+      ING_ROWS = (res.items || []).map(x => ({
+        IngredientNorm: x.IngredientNorm || '',
+        IngredientRaw: x.IngredientRaw || '',
+        Notes: x.Notes || '',
+        QtyNum: (x.QtyNum === '' || x.QtyNum === null || x.QtyNum === undefined) ? '' : String(x.QtyNum),
+        QtyText: cleanQtyText(x.QtyText || ''),  // Clean date strings from QtyText
+        StoreId: x.StoreId || getDefaultStoreId() || '',
+        Unit: x.Unit || '',
+        Category: x.Category || '',
+        idx: (x.idx === '' || x.idx === null || x.idx === undefined) ? '' : Number(x.idx),
+      }));
+      
+      // Auto-categorize all ingredients (even if they have a category, to ensure consistency)
+      document.getElementById('rmStatus').textContent = 'Categorizing ingredients...';
+      
+      let categorized = 0;
+      for (let i = 0; i < ING_ROWS.length; i++) {
+        const row = ING_ROWS[i];
+        const name = row.IngredientRaw || row.IngredientNorm;
+        if (name && name.trim().length >= 2) {
+          const catRes = await api('classifyIngredient', { name });
+          if (catRes.ok && catRes.category) {
+            ING_ROWS[i].Category = catRes.category;
+            categorized++;
+          }
+        }
+        // Small delay to avoid overwhelming the API
+        await new Promise(r => setTimeout(r, 5));
+      }
+      
+      // CRITICAL: Auto-save ingredients with categories to database
+      // This ensures categories persist and show up in shopping list
+      try {
+        const saveResult = await api('upsertRecipeWithIngredients', {
+          recipe: { RecipeId: CURRENT_RECIPE_ID, Title: (document.getElementById('rTitle') ? String(document.getElementById('rTitle').value||'').trim() : '') },
+          items: ING_ROWS.map(x => ({
+            IngredientNorm: x.IngredientNorm,
+            IngredientRaw: x.IngredientRaw,
+            Notes: x.Notes,
+            QtyNum: x.QtyNum === '' ? null : Number(x.QtyNum),
+            QtyText: x.QtyText,
+            StoreId: x.StoreId,
+            Unit: x.Unit,
+            Category: x.Category || ''
+          }))
+        });
+        
+        if (saveResult.ok) {
+          console.log(`Auto-saved ${categorized} categorized ingredients`);
+        } else {
+          console.error('Auto-save failed:', saveResult.error);
+          document.getElementById('rmStatus').textContent = 'Warning: Categories may not have saved';
+        }
+      } catch (err) {
+        console.error('Auto-save error:', err);
+        document.getElementById('rmStatus').textContent = 'Warning: Categories may not have saved';
+      }
+      
+      // Store original rows for scaling
+      RECIPE_ORIGINAL_ING_ROWS = JSON.parse(JSON.stringify(ING_ROWS));
+      RECIPE_SCALE = 1.0;
+      updateScaleDisplay();
+      renderIngredientsTable();
+      document.getElementById('rmStatus').textContent = '';
+    }
+
+    // Apply current scale to ING_ROWS (used for printing scaled quantities)
+    function applyCurrentScaleToDisplay(forceRefresh = false) {
+      // Always re-apply if forceRefresh is true (e.g., for print operations)
+      if (forceRefresh) {
+        ING_ROWS = RECIPE_ORIGINAL_ING_ROWS.map(row => {
+          const scaled = { ...row };
+          if (row.QtyNum !== '' && row.QtyNum !== null && row.QtyNum !== undefined) {
+            const originalNum = parseFloat(row.QtyNum);
+            if (!isNaN(originalNum)) {
+              scaled.QtyNum = String(Math.round(originalNum * RECIPE_SCALE * 100) / 100);
+            }
+          }
+          return scaled;
+        });
+        renderIngredientsTable();
+        return;
+      }
+      
+      // Check if scaling is needed: if RECIPE_SCALE is 1.0, no scaling needed
+      if (RECIPE_SCALE === 1.0) {
+        return; // No scaling needed, ING_ROWS already has original values
+      }
+      
+      // Only apply scale if ING_ROWS matches original (not already scaled)
+      // Compare first row's QtyNum to detect if already scaled
+      const originalFirst = RECIPE_ORIGINAL_ING_ROWS[0];
+      const currentFirst = ING_ROWS[0];
+      
+      if (originalFirst && currentFirst) {
+        const originalNum = originalFirst.QtyNum ? parseFloat(originalFirst.QtyNum) : null;
+        const currentNum = currentFirst.QtyNum ? parseFloat(currentFirst.QtyNum) : null;
+        
+        // If current already matches scaled value, don't re-scale
+        if (originalNum !== null && currentNum !== null) {
+          const expectedScaled = Math.round(originalNum * RECIPE_SCALE * 100) / 100;
+          if (Math.abs(currentNum - expectedScaled) < 0.001) {
+            return; // Already scaled, no need to re-apply
+          }
+        }
+      }
+      
+      // Apply scaling from original
+      ING_ROWS = RECIPE_ORIGINAL_ING_ROWS.map(row => {
+        const scaled = { ...row };
+        if (row.QtyNum !== '' && row.QtyNum !== null && row.QtyNum !== undefined) {
+          const originalNum = parseFloat(row.QtyNum);
+          if (!isNaN(originalNum)) {
+            scaled.QtyNum = String(Math.round(originalNum * RECIPE_SCALE * 100) / 100);
+          }
+        }
+        return scaled;
+      });
+      renderIngredientsTable();
+    }
+
+    // ---------- Recipe Scaling ----------
+    function updateScaleDisplay() {
+      const scaleValueEl = document.getElementById('scaleValue');
+      if (scaleValueEl) {
+        scaleValueEl.textContent = RECIPE_SCALE.toFixed(1) + 'x';
+      }
+    }
+
+    function scaleRecipe(factor) {
+      const newScale = Math.round((RECIPE_SCALE + factor) * 10) / 10;
+      if (newScale < 0.1 || newScale > 10) return; // Limit scale range
+      
+      RECIPE_SCALE = newScale;
+      
+      // Scale the displayed quantities
+      ING_ROWS = RECIPE_ORIGINAL_ING_ROWS.map(row => {
+        const scaled = { ...row };
+        if (row.QtyNum !== '' && row.QtyNum !== null && row.QtyNum !== undefined) {
+          const originalNum = parseFloat(row.QtyNum);
+          if (!isNaN(originalNum)) {
+            scaled.QtyNum = String(Math.round(originalNum * RECIPE_SCALE * 100) / 100);
+          }
+        }
+        return scaled;
+      });
+      
+      updateScaleDisplay();
+      renderIngredientsTable();
+    }
+
+    function resetRecipeScale() {
+      RECIPE_SCALE = 1.0;
+      ING_ROWS = JSON.parse(JSON.stringify(RECIPE_ORIGINAL_ING_ROWS));
+      updateScaleDisplay();
+      renderIngredientsTable();
+    }
+
+    // ---------- Auto-Categorization ----------
+    // Debounce timer reference for cleanup (declared in global state)
+
+    const debouncedClassify = debounce(async (idx, ingredientName) => {
+      if (!ingredientName || ingredientName.trim().length < 2) return;
+      if (recipeModalMode === 'view') return;
+      
+      const res = await api('classifyIngredient', { name: ingredientName });
+      if (res.ok && res.category && ING_ROWS[idx]) {
+        // Only auto-set if current category is empty/default
+        if (!ING_ROWS[idx].Category || ING_ROWS[idx].Category === '') {
+          ING_ROWS[idx].Category = res.category;
+          renderIngredientsTable();
+        }
+      }
+    }, 500); // 500ms debounce
+
+    function triggerAutoClassify(idx, ingredientName) {
+      debouncedClassify(idx, ingredientName);
+    }
+
+    // Auto-categorize ALL ingredients (called when loading recipe and when clicking Categorize All)
+    async function categorizeAllIngredients() {
+      if (recipeModalMode === 'view') return;
+      
+      const statusEl = document.getElementById('rmStatus');
+      statusEl.textContent = 'Categorizing...';
+      
+      let categorized = 0;
+      let failed = 0;
+      
+      for (let i = 0; i < ING_ROWS.length; i++) {
+        const row = ING_ROWS[i];
+        const name = row.IngredientRaw || row.IngredientNorm;
+        if (!name || name.trim().length < 2) continue;
+        
+        // Always classify, even if category already exists (to update/fix)
+        const res = await api('classifyIngredient', { name });
+        console.log(`Categorizing "${name}":`, res);
+        
+        if (res.ok && res.category) {
+          ING_ROWS[i].Category = res.category;
+          categorized++;
+        } else {
+          failed++;
+        }
+        
+        // Small delay to avoid overwhelming the API
+        await new Promise(r => setTimeout(r, 10));
+      }
+      
+      renderIngredientsTable();
+      
+      if (categorized > 0) {
+        statusEl.textContent = `Categorized ${categorized} ingredient(s).${failed > 0 ? ` (${failed} failed)` : ''}`;
+      } else if (failed > 0) {
+        statusEl.textContent = 'Could not categorize ingredients.';
+      } else {
+        statusEl.textContent = 'All ingredients already categorized.';
+      }
+      
+      // Clear status after 3 seconds
+      setTimeout(() => { if (statusEl.textContent.includes('Categorized')) statusEl.textContent = ''; }, 3000);
+    }
+
+    // Train category for an ingredient
+    async function trainIngredientCategory(idx, ingredientName, category) {
+      if (!ingredientName || !category || recipeModalMode === 'view') return;
+      
+      const res = await api('trainIngredientCategory', { name: ingredientName, category });
+      if (res.ok) {
+        console.log(`Learned: "${ingredientName}" → "${category}"`);
+      }
+    }
+
+    // Helper to clean date strings from QtyText (fractions like 1/2 were parsed as dates)
+    function cleanQtyText(qtyText) {
+      if (!qtyText) return '';
+      // Remove date strings that were mistakenly parsed from fractions
+      // Pattern matches: "Fri Jan 02 2026 00:00:00 GMT-0500 (Eastern Standard Time)" or similar
+      const datePattern = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{4}\s+\d{2}:\d{2}:\d{2}\s+GMT[-+]\d{4}\s+\([^)]+\)\s*/i;
+      return qtyText.replace(datePattern, '').trim();
+    }
+
+    function renderIngredientsTable() {
+      const wrap = document.getElementById('ingTableWrap');
+      if (!wrap) return;
+
+      if (!ING_ROWS.length) {
+        wrap.innerHTML = `<div class="muted">No ingredients yet.</div>`;
+        return;
+      }
+
+      const isView = (recipeModalMode === 'view');
+      const disabledAttr = isView ? 'disabled' : '';
+
+      wrap.innerHTML = ING_ROWS.map((r, idx) => {
+        const effectiveStoreId = String(r.StoreId || '').trim() || (getDefaultStoreId() || '');
+        const catIndicator = (r.Category && r.Category !== '') ? `<span class="auto-cat-indicator auto-cat-active">✓</span>` : '';
+        const cleanedQtyText = cleanQtyText(r.QtyText || '');
+        return `
+          <div class="item ingGrid" data-idx="${idx}">
+            <div class="row">
+              <div class="col-4">
+                <label>Name${catIndicator}</label>
+                <input ${disabledAttr} value="${escapeAttr(r.IngredientRaw||r.IngredientNorm||r.Name||'')}" data-action="ing-set" data-idx="${idx}" data-key="IngredientRaw" placeholder="e.g., chicken breast">
+              </div>
+              <div class="col-2">
+                <label>Qty #</label>
+                <input ${disabledAttr} list="dlQtyNum" value="${escapeAttr(r.QtyNum ?? '')}" data-action="ing-set" data-idx="${idx}" data-key="QtyNum">
+              </div>
+              <div class="col-2">
+                <label>Unit</label>
+                <input ${disabledAttr} list="dlUnit" value="${escapeAttr(r.Unit||'')}" data-action="ing-set" data-idx="${idx}" data-key="Unit">
+              </div>
+              <div class="col-4">
+                <label>Qty Text</label>
+                <input ${disabledAttr} value="${escapeAttr(cleanedQtyText)}" data-action="ing-set" data-idx="${idx}" data-key="QtyText">
+              </div>
+              <div class="col-4">
+                <label>Category</label>
+                <select ${disabledAttr} data-action="ing-set" data-action-cat="ing-category" data-idx="${idx}" data-key="Category">
+                  ${optionHtml_(META.categories, r.Category||'')}
+                </select>
+              </div>
+              <div class="col-4">
+                <label>Store</label>
+                <select ${disabledAttr} data-action="ing-store" data-idx="${idx}">
+                  ${storeOptionsHtml_(effectiveStoreId)}
+                </select>
+              </div>
+              <div class="col-4">
+                <label>Ingredient Norm</label>
+                <input ${disabledAttr} value="${escapeAttr(r.IngredientNorm||'')}" data-action="ing-set" data-idx="${idx}" data-key="IngredientNorm">
+              </div>
+              ${isView ? '' : `
+              <div class="col-12" style="margin-top:6px;">
+                <div class="actions">
+                  <button class="danger" data-action="ing-del" data-idx="${idx}">Remove</button>
+                </div>
+              </div>
+              `}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      ensureDatalist_('dlQtyNum', META.qtyNumOptions);
+      ensureDatalist_('dlUnit', META.unitOptions);
+    }
+
+
+    function addIngredientRow() {
+      ING_ROWS.push({ IngredientNorm:'', IngredientRaw:'', Notes:'', QtyNum:'', QtyText:'', StoreId:(getDefaultStoreId() || ''), Unit:'', Category:'', idx:'' });
+      renderIngredientsTable();
+    }
+    function removeIngredientRow(idx) { ING_ROWS.splice(idx, 1); renderIngredientsTable(); }
+
+    async function saveRecipeAndIngredients() {
+      if (recipeModalMode === 'view') return;
+      document.getElementById('rmStatus').textContent = 'Saving...';
+
+      const title = document.getElementById('rTitle').value.trim();
+      if (!title) { alert('Title is required.'); document.getElementById('rmStatus').textContent=''; return; }
+
+      // Auto-categorize all ingredients before saving (ensures categories persist)
+      await categorizeAllIngredients();
+
+      const recipe = {
+        RecipeId: CURRENT_RECIPE_ID || '',
+        Title: title,
+        URL: document.getElementById('rUrl').value.trim(),
+        Cuisine: document.getElementById('rCuisine').value.trim(),
+        MealType: document.getElementById('rMealType').value.trim() || 'Any',
+        Notes: document.getElementById('rNotes').value || '',
+        Instructions: document.getElementById('rInstructions').value || '',
+      };
+
+      const items = ING_ROWS.map(x => ({
+          IngredientNorm: (x.IngredientNorm||'').trim(),
+          IngredientRaw: (x.IngredientRaw||'').trim(),
+          Notes: (x.Notes||'').trim(),
+          QtyNum: (x.QtyNum === '' ? '' : Number(x.QtyNum)),
+          QtyText: (x.QtyText||'').trim(),
+          StoreId: (x.StoreId||'').trim(),
+          Unit: (x.Unit||'').trim(),
+          Category: (x.Category||'').trim(),
+        }))
+        .filter(x => x.IngredientRaw);
+
+      const res = await api('upsertRecipeWithIngredients', { recipe, items });
+      if (!res.ok) {
+        alert(res.error || 'Save failed');
+        document.getElementById('rmStatus').textContent = '';
+        return;
+      }
+      CURRENT_RECIPE_ID = res.RecipeId;
+
+      // Reset scale after save (use original values for the view)
+      resetRecipeScale();
+      document.getElementById('rmStatus').textContent = 'Saved.';
+      await resetAndLoadRecipes();
+      await openRecipeModalView(CURRENT_RECIPE_ID);
+    }
+
+    async function deleteRecipeUi() {
+      if (!CURRENT_RECIPE_ID) { alert('Open an existing recipe to delete.'); return; }
+      if (!confirm('Delete this recipe and its ingredients?')) return;
+
+      const res = await api('deleteRecipeCascade', { recipeId: CURRENT_RECIPE_ID });
+      if (!res.ok) { alert(res.error || 'Delete failed'); return; }
+
+      closeRecipeModal();
+      await resetAndLoadRecipes();
+    }
+
+    // ---------- delegated handlers ----------
+    document.addEventListener('click', async (e) => {
+      const rv = e.target.closest('[data-action="recipe-view"]');
+      if (rv) { const rid = rv.getAttribute('data-rid'); if (rid) await openRecipeModalView(rid); return; }
+
+      const re = e.target.closest('[data-action="recipe-edit"]');
+      if (re) { const rid = re.getAttribute('data-rid'); if (rid) await openRecipeModalEdit(rid); return; }
+
+
+      const rp = e.target.closest('[data-action="recipe-print"]');
+      if (rp) { 
+        const rid = rp.getAttribute('data-rid'); 
+        if (rid) {
+          // Load recipe first, wait for it to fully load with categories
+          await openRecipeModalView(rid);
+          // Apply current scale to display before printing (force refresh)
+          applyCurrentScaleToDisplay(true);
+          // Now print with whatever quantities are displayed (including any scaling)
+          await printRecipeWithQuantities();
+        }
+        return; 
+      }
+
+      const ir = e.target.closest('[data-action="ing-del"]');
+      if (ir) { if (recipeModalMode === 'view') return; removeIngredientRow(Number(ir.getAttribute('data-idx'))); return; }
+
+      // Scale controls handlers
+      const scaleDown = e.target.closest('[data-action="scale-down"]');
+      if (scaleDown) { scaleRecipe(-0.5); return; }
+
+      const scaleUp = e.target.closest('[data-action="scale-up"]');
+      if (scaleUp) { scaleRecipe(0.5); return; }
+
+      const scaleReset = e.target.closest('[data-action="scale-reset"]');
+      if (scaleReset) { resetRecipeScale(); return; }
+    });
+
+    document.addEventListener('input', (e) => {
+      const s = e.target.closest('[data-action="ing-set"]');
+      if (s) {
+        if (recipeModalMode === 'view') return;
+        const idx = Number(s.getAttribute('data-idx'));
+        const key = s.getAttribute('data-key');
+        if (!Number.isFinite(idx) || !key || !ING_ROWS[idx]) return;
+        ING_ROWS[idx][key] = e.target.value;
+        
+        // Trigger auto-categorization when typing ingredient name
+        if (key === 'IngredientRaw' && e.target.value && e.target.value.length >= 2) {
+          triggerAutoClassify(idx, e.target.value);
+        }
+      }
+    });
+
+    document.addEventListener('change', (e) => {
+      const sel = e.target.closest('[data-action="ing-store"]');
+      if (sel) {
+        if (recipeModalMode === 'view') return;
+        const idx = Number(sel.getAttribute('data-idx'));
+        if (!Number.isFinite(idx) || !ING_ROWS[idx]) return;
+        ING_ROWS[idx].StoreId = sel.value;
+      }
+
+      // Train classifier when category is manually set
+      const catSel = e.target.closest('[data-action-cat="ing-category"]');
+      if (catSel) {
+        if (recipeModalMode === 'view') return;
+        const idx = Number(catSel.getAttribute('data-idx'));
+        const newCategory = catSel.value;
+        if (!Number.isFinite(idx) || !ING_ROWS[idx] || !newCategory) return;
+        
+        const oldCategory = ING_ROWS[idx].Category;
+        ING_ROWS[idx].Category = newCategory;
+        
+        // Train the classifier if the user explicitly set a category
+        const ingredientName = ING_ROWS[idx].IngredientRaw || ING_ROWS[idx].IngredientNorm;
+        if (ingredientName && ingredientName.length >= 2) {
+          trainIngredientCategory(idx, ingredientName, newCategory);
+        }
+      }
+    });
+
+    // ---------- meal picker ----------
+    
+    function openMealPicker(date, slot){
+      MP = { open:true, date, slot, q:'', recipes:[] };
+      document.getElementById('mpTitle').textContent = `Select a recipe for ${slot}`;
+      document.getElementById('mpSub').textContent = `Date: ${date}`;
+      document.getElementById('mpSearch').value = '';
+      document.getElementById('mpStatus').textContent = '';
+      document.getElementById('mpList').innerHTML = '';
+      document.getElementById('mealPickerBack').style.display = 'flex';
+      mealPickerLoad(true);
+    }
+
+    function closeMealPicker(){ document.getElementById('mealPickerBack').style.display = 'none'; MP.open=false; }
+    async function mealPickerLoad(reset){
+      if (!MP.open) return;
+      if (reset) { MP.recipes=[]; document.getElementById('mpList').innerHTML=''; }
+      document.getElementById('mpStatus').textContent = 'Loading...';
+      const res = await api('listRecipesAll', { q: MP.q });
+      if (!res.ok) { document.getElementById('mpStatus').textContent = res.error || 'Error'; return; }
+      MP.recipes = res.recipes || [];
+      renderMealPickerList();
+      document.getElementById('mpStatus').textContent = MP.recipes.length ? `Loaded ${MP.recipes.length}.` : 'No matches.';
+    }
+
+
+    
+    function renderMealPickerList(){
+      const box = document.getElementById('mpList');
+      if (!box) return;
+      box.innerHTML = (MP.recipes || []).map(r => `
+        <div class="item" style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+          <div>
+            <div><strong>${escapeHtml(r.Title || '')}</strong></div>
+            <div class="muted">${escapeHtml(r.Cuisine || '')}</div>
+          </div>
+          <div class="actions">
+            <button class="primary" data-action="mp-select" data-rid="${escapeAttr(r.RecipeId)}" data-title="${escapeAttr(r.Title||'')}">Select</button>
+              <button class="ghost" data-action="mp-view" data-rid="${escapeAttr(r.RecipeId)}">View</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+
+    document.getElementById('mealPickerBack').addEventListener('click', async (e) => {
+            const viewBtn = e.target.closest('[data-action="mp-view"]');
+      if (viewBtn) {
+        const rid = viewBtn.getAttribute('data-rid');
+        if (rid) {
+          await openRecipeModalView(rid);
+        }
+        return;
+      }
+
+const pick = e.target.closest('[data-action="mp-select"]');
+      if (pick) {
+        const rid = pick.getAttribute('data-rid');
+        const title = pick.getAttribute('data-title');
+        await api('upsertPlanMeal', { date: MP.date, slot: MP.slot, meal: { RecipeId: rid, Title: title }});
+        await loadPlansIntoUi(PLAN.start, PLAN.days);
+        closeMealPicker();
+        return;
+      }
+    });
+
+    // ---------- plans ----------
+    async function loadPlansIntoUi(start, days){
+      PLAN.start = start;
+      PLAN.days = days;
+      const end = addDays(start, days-1);
+
+      const res = await api('getPlansRange', { start, end });
+      if (!res.ok) { document.getElementById('topStatus').textContent = res.error || 'Plan load error'; return; }
+      PLAN.plansByDate = {};
+      for (const p of (res.plans || [])) {
+        PLAN.plansByDate[p.Date] = p;
+        // Debug: log any meals with their fields
+        for (const slot of ['Breakfast','Lunch','Dinner']) {
+          if (p[slot]) {
+            console.log(`Loaded ${p.Date} ${slot}:`, JSON.stringify(p[slot]));
+          }
+        }
+      }
+
+      renderPlanner('planList', start, days, true);
+      // Bulk planner UI may be removed/hidden; do not fail if container is absent.
+      renderPlanner('bulkList', start, days, false);
+      document.getElementById('topStatus').textContent = `Loaded plans: ${start} → ${end}`;
+    }
+
+    
+    function slotLine(date, slot, meal){
+      const hasRecipe = !!(meal && meal.RecipeId);
+      const title = hasRecipe ? meal.Title : '(empty)';
+      const rid = hasRecipe ? meal.RecipeId : '';
+      const useLeft = !!(meal && (meal.UseLeftovers === true || meal.UseLeftovers === 1 || meal.UseLeftovers === 'true'));
+      const from = meal && meal.From ? meal.From : '';
+      
+      // DEBUG: Log to console for debugging
+      if (useLeft) {
+        console.log('Leftovers meal detected:', { date, slot, title, useLeft, from });
+      }
+      
+      // Parse the from field to extract meal info (format: "YYYY-MM-DD Slot — Title")
+      let sourceTitle = '';
+      let sourceSlotInfo = '';
+      if (from) {
+        const match = from.match(/^(\d{4}-\d{2}-\d{2})\s+(\w+)\s+[—–-]\s+(.+)$/);
+        if (match) {
+          sourceSlotInfo = `${match[1]} ${match[2]}`;
+          sourceTitle = match[3];
+        }
+      }
+      
+      // Display title - show the source meal title when it's a leftovers slot
+      let displayTitle = escapeHtml(title);
+      if (useLeft) {
+        if (sourceTitle) {
+          // Has source meal info - show arrow and badge
+          displayTitle = `<span style="color:#4da3ff;font-weight:600;">↳ ${escapeHtml(sourceTitle)}</span> <span style="color:#fbbf24;font-size:11px;font-weight:600;background:rgba(251,191,36,0.2);padding:2px 6px;border-radius:4px;margin-left:6px;">LEFTOVERS</span>`;
+        } else {
+          // No source info but marked as leftovers - still show badge
+          displayTitle = `<span style="color:#fbbf24;font-size:11px;font-weight:600;background:rgba(251,191,36,0.2);padding:2px 6px;border-radius:4px;margin-right:6px;">LEFTOVERS</span> ${escapeHtml(title)}`;
+        }
+      }
+      
+      // From info display
+      const fromHtml = from ? `<div class="muted" style="margin-top:4px;font-size:11px;display:flex;align-items:center;gap:6px;"><span style="color:#4da3ff;">↱</span> <span>From: ${escapeHtml(sourceSlotInfo)}</span></div>` : '';
+      
+      // Style for the leftovers button - blue background when active for visibility
+      const leftoversBtnStyle = useLeft 
+        ? "background:#1e40af;color:#ffffff;font-weight:600;border:2px solid #1e40af;" 
+        : "background:#dbeafe;color:#1e40af;border:2px solid #3b82f6;";
+      
+      // Button is always enabled now to allow selecting leftovers for empty slots
+      
+      return `
+        <div class="item" style="margin-top:8px;${useLeft ? 'border-left:4px solid #3b82f6;padding-left:12px;background:linear-gradient(90deg, rgba(59,130,246,0.08) 0%, transparent 30%);' : ''}">
+          <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
+            <div style="min-width:0;">
+              <div><strong>${escapeHtml(slot)}:</strong> ${displayTitle}</div>
+              ${fromHtml}
+            </div>
+            <div class="actions" style="flex-wrap:wrap;">
+              <button class="primary" data-action="select-meal" data-date="${escapeAttr(date)}" data-slot="${escapeAttr(slot)}">Select</button>
+              <button class="ghost" data-action="planner-view" data-rid="${escapeAttr(rid)}" ${hasRecipe ? '' : 'disabled'}>View</button>
+              <button class="ghost" data-action="planner-edit" data-rid="${escapeAttr(rid)}" ${hasRecipe ? '' : 'disabled'}>Edit</button>
+              <button class="ghost" data-action="planner-print" data-rid="${escapeAttr(rid)}" ${hasRecipe ? '' : 'disabled'}>Print</button>
+              <button style="${leftoversBtnStyle}padding:8px 12px;border-radius:8px;cursor:pointer;font-size:12px;" data-action="planner-leftovers" data-date="${escapeAttr(date)}" data-slot="${escapeAttr(slot)}" data-rid="${escapeAttr(rid)}" data-title="${escapeAttr(hasRecipe ? title : '')}">${useLeft ? '✓ Leftovers' : 'Use leftovers'}</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+
+    
+    function renderPlanner(containerId, start, days, includeSwap){
+      const box = document.getElementById(containerId);
+      if (!box) return;
+      const dates = [];
+      for (let i=0;i<days;i++) dates.push(addDays(start, i));
+
+      box.innerHTML = dates.map(date => {
+        const p = PLAN.plansByDate[date] || { Date: date, Breakfast:null, Lunch:null, Dinner:null };
+        return `
+          <details open class="item" data-day="${escapeAttr(date)}">
+            <summary>${escapeHtml(date)}</summary>
+            <div style="margin-top:10px;">
+              ${slotLine(date,'Breakfast', p.Breakfast)}
+              ${slotLine(date,'Lunch', p.Lunch)}
+              ${slotLine(date,'Dinner', p.Dinner)}
+              ${includeSwap ? `
+                <div class="hr"></div>
+                <div class="actions">
+                  <button style="background:#4da3ff;color:#000;border:none;padding:10px 16px;border-radius:8px;font-weight:600;cursor:pointer;" data-action="swap" data-date="${escapeAttr(date)}" data-a="Breakfast" data-b="Lunch">🔄 Swap Breakfast/Lunch</button>
+                  <button style="background:#4da3ff;color:#000;border:none;padding:10px 16px;border-radius:8px;font-weight:600;cursor:pointer;" data-action="swap" data-date="${escapeAttr(date)}" data-a="Lunch" data-b="Dinner">🔄 Swap Lunch/Dinner</button>
+                  <button style="background:#4da3ff;color:#000;border:none;padding:10px 16px;border-radius:8px;font-weight:600;cursor:pointer;" data-action="swap" data-date="${escapeAttr(date)}" data-a="Breakfast" data-b="Dinner">🔄 Swap Breakfast/Dinner</button>
+                </div>
+              ` : ''}
+            </div>
+          </details>
+        `;
+      }).join('');
+    }
+
+
+    
+    // Pick which prior meal/day the leftovers come from, for annotation.
+    async function pickLeftoversSourceAsync_(targetDate, targetSlot){
+      const opts = [];
+      const dates = [];
+      for (let i=0;i<PLAN.days;i++) dates.push(addDays(PLAN.start, i));
+
+      for (const d of dates) {
+        if (d >= targetDate) continue;
+        const day = PLAN.plansByDate[d];
+        if (!day) continue;
+        for (const slot of ['Breakfast','Lunch','Dinner']) {
+          const m = day[slot];
+          if (!m || !m.RecipeId || !m.Title) continue;
+          // Only show meals that are NOT already marked as leftovers
+          if (m.UseLeftovers) continue;
+          opts.push({ 
+            value: `${d} ${slot} — ${m.Title}`, 
+            label: `${d} ${slot}: ${m.Title}`,
+            recipeId: m.RecipeId,
+            title: m.Title
+          });
+        }
+      }
+      if (!opts.length) {
+        alert('No previous meals found to use as leftovers.\n\nTip: First plan some regular meals, then come back and mark them as leftovers for future days.');
+        return null;
+      }
+
+      return await new Promise((resolve) => {
+        const ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.7);z-index:9999;';
+
+        const card = document.createElement('div');
+        card.style.cssText = 'background:#ffffff;border-radius:16px;padding:28px;max-width:480px;width:90%;box-shadow:0 25px 80px rgba(0,0,0,0.5);';
+
+        card.innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+            <div style="font-size:20px;font-weight:700;color:#111;">🍽️ Select Meal to Reuse</div>
+            <button id="lofClose" style="padding:10px 16px;border-radius:50%;border:1px solid #e5e7eb;background:#f9fafb;cursor:pointer;font-size:18px;color:#6b7280;">✕</button>
+          </div>
+          <div style="font-size:15px;color:#111111;line-height:1.6;margin-bottom:20px;padding:16px;background:#f3f4f6;border-radius:10px;">
+            <strong style="color:#111111;">${escapeHtml(targetDate)} ${escapeHtml(targetSlot)}</strong><br>
+            Choose which meal to reuse as leftovers:
+          </div>
+          <select id="lofSel" style="width:100%;padding:14px 16px;border:2px solid #3b82f6;border-radius:10px;font-size:15px;margin-bottom:20px;background:#fff;cursor:pointer;color:#111;">
+            ${opts.map(o => `<option value="${escapeAttr(o.value)}" style="color:#111;">${escapeHtml(o.label)}</option>`).join('')}
+          </select>
+          <div style="display:flex;justify-content:flex-end;gap:12px;">
+            <button id="lofSkip" style="padding:14px 24px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;cursor:pointer;font-size:14px;color:#374151;">Cancel</button>
+            <button id="lofOk" style="padding:14px 28px;border-radius:10px;font-weight:600;background:#2563eb;color:#ffffff;border:none;cursor:pointer;font-size:14px;box-shadow:0 4px 12px rgba(37,99,235,0.3);">Use This Meal</button>
+          </div>
+        `;
+
+        ov.appendChild(card);
+        document.body.appendChild(ov);
+
+        function cleanup(val){
+          try { document.body.removeChild(ov); } catch(_) {}
+          resolve(val);
+        }
+
+        card.querySelector('#lofClose').addEventListener('click', () => cleanup(null));
+        card.querySelector('#lofSkip').addEventListener('click', () => cleanup(null));
+        card.querySelector('#lofOk').addEventListener('click', () => {
+          const sel = card.querySelector('#lofSel');
+          const selectedOption = opts[sel.selectedIndex];
+          // Return object with string value for parsing and recipe details for the meal
+          cleanup(selectedOption ? {
+            value: sel.value,
+            recipeId: selectedOption.recipeId,
+            title: selectedOption.title
+          } : null);
+        });
+        ov.addEventListener('click', (ev) => { if (ev.target === ov) cleanup(null); });
+      });
+    }
+
+document.addEventListener('click', async (e) => {
+      // Planner: Select / Replace opens the recipe picker
+      const sel = e.target.closest('[data-action="select-meal"]');
+      if (sel) { openMealPicker(sel.dataset.date, sel.dataset.slot); return; }
+
+      // Backwards compatibility: older markup
+      const pick = e.target.closest('[data-action="pick-meal"]');
+      if (pick) { openMealPicker(pick.dataset.date, pick.dataset.slot); return; }
+
+      // Planner: View/Edit/Print
+      const pv = e.target.closest('[data-action="planner-view"],[data-action="view-meal"]');
+      if (pv) { const rid = pv.dataset.rid; if (rid) await openRecipeModalView(rid); return; }
+
+      const pe = e.target.closest('[data-action="planner-edit"],[data-action="edit-meal"]');
+      if (pe) { const rid = pe.dataset.rid; if (rid) await openRecipeModalEdit(rid); return; }
+
+      const pp = e.target.closest('[data-action="planner-print"],[data-action="print-meal"]');
+      if (pp) { 
+        const rid = pp.dataset.rid; 
+        if (rid) {
+          // Load recipe first, wait for it to fully load with categories
+          await openRecipeModalView(rid);
+          // Now print with whatever quantities are displayed
+          printRecipeWithQuantities();
+        }
+        return; 
+      }
+
+      // Planner: Clear
+      const clear = e.target.closest('[data-action="clear-meal"]');
+      if (clear) {
+        await api('upsertPlanMeal', { date: clear.dataset.date, slot: clear.dataset.slot, meal: null });
+        await loadPlansIntoUi(PLAN.start, PLAN.days);
+        return;
+      }
+    });
+
+    // ---------- shopping list ----------
+    const SHOP = { start:'', end:'', groups: [] };
+
+    function normalizeShopTitle_(s){
+      const str = String(s || '').trim();
+      const denOk = new Set(['2','3','4','8','16']);
+      let out = str.replace(/^(\d+)\s+(\d+)\s+(\d+)\b/, (m,a,b,c)=> denOk.has(c) ? `${a} ${b}/${c}` : m);
+      out = out.replace(/^(\d+)\s+(\d+)\b/, (m,a,b)=> denOk.has(b) ? `${a}/${b}` : m);
+      return out;
+    }
+
+
+    function shopQtyDisplay_(it){
+      // Prefer numeric quantity when present; format as common cooking fractions for display.
+      const qnRaw = (it && (it.QtyNum !== null && it.QtyNum !== undefined && it.QtyNum !== '')) ? Number(it.QtyNum) : null;
+      const qn = (qnRaw !== null && Number.isFinite(qnRaw)) ? qnRaw : null;
+
+      // If QtyText exists and looks meaningful, keep it (this mirrors ingredients behavior).
+      // However, some legacy rows may have malformed QtyText; in that case, prefer QtyNum formatting.
+      const qt = String((it && it.QtyText) || '').trim();
+
+      function normalizeLostSlash_(s){
+        const denOk = new Set(['2','3','4','8','16']);
+        // "2 1 2 ..." => "2 1/2 ..."
+        s = s.replace(/^(\d+)\s+(\d+)\s+(\d+)\b/, (m,a,b,c)=> denOk.has(c) ? `${a} ${b}/${c}` : m);
+        // "1 2 ..." => "1/2 ..."
+        s = s.replace(/^(\d+)\s+(\d+)\b/, (m,a,b)=> denOk.has(b) ? `${a}/${b}` : m);
+        return s;
+      }
+
+      function fracFromNumber_(x){
+        const sign = x < 0 ? -1 : 1;
+        let v = Math.abs(x);
+
+        const whole = Math.floor(v + 1e-12);
+        const frac = v - whole;
+
+        // Candidate denominators (common in recipes)
+        const denoms = [2,3,4,8,16];
+        let best = null;
+        for (const d of denoms){
+          const n = Math.round(frac * d);
+          const approx = n / d;
+          const err = Math.abs(approx - frac);
+          if (!best || err < best.err){
+            best = { n, d, err };
+          }
+        }
+
+        // Relaxed threshold so common cooking decimals display correctly.
+        if (!best || best.err > 0.02){
+          return null;
+        }
+
+        let n = best.n;
+        let d = best.d;
+        if (n === 0){
+          return sign * whole;
+        }
+        if (n === d){
+          return sign * (whole + 1);
+        }
+
+        // Reduce fraction
+        const gcd = (a,b)=> b ? gcd(b, a%b) : a;
+        const g = gcd(n, d);
+        n = n / g; d = d / g;
+
+        const w = whole;
+        const prefix = (sign < 0) ? '-' : '';
+        if (w === 0){
+          return `${prefix}${n}/${d}`;
+        }
+        return `${prefix}${w} ${n}/${d}`;
+      }
+
+      if (qn !== null){
+        const asFrac = fracFromNumber_(qn);
+        if (asFrac !== null){
+          return String(asFrac);
+        }
+        // If it is effectively an integer, show as integer
+        if (Math.abs(qn - Math.round(qn)) < 1e-9) return String(Math.round(qn));
+        // Otherwise, fall back to up to 3 decimals without trailing zeros
+        return String(Number(qn.toFixed(3))).replace(/\.0+$/,'').replace(/(\.[0-9]*?)0+$/,'$1');
+      }
+
+      if (qt) return normalizeLostSlash_(qt);
+      return '';
+    }
+
+    function storeOptionsHtml_(selectedId){
+      const sid0 = String(selectedId || '');
+      const sid = (!sid0 || sid0 === 'unassigned') ? (getDefaultStoreId() || '') : sid0;
+
+      const opts = (STORES || []).map(s => {
+        const v = String(s.StoreId);
+        const sel = (v === sid) ? 'selected' : '';
+        return `<option value="${escapeAttr(v)}" ${sel}>${escapeHtml(s.Name || v)}</option>`;
+      }).join('');
+
+      const unSel = (!sid) ? 'selected' : '';
+      return `<option value="" ${unSel}>Unassigned</option>` + opts;
+    }
+
+
+    function cuisineOptionsHtml_(selectedCuisine){
+      const cur = String(selectedCuisine || '').trim();
+
+      // Canonical cuisine list (static) plus any cuisines already present in the database.
+      // This avoids an empty dropdown when no recipes currently have Cuisine set, while
+      // preserving any existing/custom values.
+      const base = [
+        'Afghan','African','Albanian','American','Argentinian','Armenian','Asian','Australian','Austrian',
+        'Bangladeshi','Barbecue','Belgian','Bolivian','Brazilian','British','Bulgarian','Cajun/Creole',
+        'Cambodian','Caribbean','Chilean','Chinese','Colombian','Cuban','Czech',
+        'Danish','Dominican','Dutch',
+        'Ecuadorian','Egyptian','English','Ethiopian','European',
+        'Filipino','Finnish','French',
+        'Georgian','German','Greek','Guatemalan',
+        'Haitian','Hawaiian','Hungarian',
+        'Icelandic','Indian','Indonesian','Iranian','Iraqi','Irish','Israeli','Italian',
+        'Jamaican','Japanese','Jewish','Jordanian',
+        'Korean','Kosher',
+        'Latin American','Lebanese',
+        'Malaysian','Mediterranean','Mexican','Middle Eastern','Mongolian','Moroccan',
+        'Nepalese','New Zealand','Nigerian','Norwegian',
+        'Pakistani','Persian','Peruvian','Polish','Portuguese',
+        'Puerto Rican',
+        'Romanian','Russian',
+        'Salvadoran','Scandinavian','Scottish','Seafood','Serbian','Singaporean','Slovak','South African','South American','Spanish','Sri Lankan','Swedish','Swiss',
+        'Taiwanese','Thai','Tibetan','Turkish',
+        'Ukrainian',
+        'Vegan','Vegetarian','Vietnamese',
+        'Welsh'
+      ];
+
+      // Build a case-insensitive set of cuisines from base + existing data + current selection.
+      const map = new Map();
+      base.forEach(c => map.set(String(c).toLowerCase(), String(c)));
+
+      (RECIPES || []).forEach(r => {
+        const c = String((r && r.Cuisine) || '').trim();
+        if (c) map.set(c.toLowerCase(), c);
+      });
+
+      if (cur) map.set(cur.toLowerCase(), cur);
+
+      const items = Array.from(map.values()).sort((a,b) => a.localeCompare(b));
+      const noneSel = (!cur) ? 'selected' : '';
+      return [`<option value="" ${noneSel}>(None)</option>`].concat(items.map(c => {
+        const sel = (c === cur) ? 'selected' : '';
+        return `<option value="${escapeAttr(c)}" ${sel}>${escapeHtml(c)}</option>`;
+      })).join('');
+    }
+
+    function setCuisineSelect_(value){
+      const el = document.getElementById('rCuisine');
+      if (!el) return;
+      el.innerHTML = cuisineOptionsHtml_(value);
+      el.value = String(value || '').trim();
+    }
+
+    function renderShop_(groups){
+      SHOP.groups = Array.isArray(groups) ? groups : [];
+      const out = document.getElementById('shopOut');
+      if (!SHOP.groups.length) {
+        out.innerHTML = `<div class="muted">No items. Plan meals first.</div>`;
+        return;
+      }
+
+      out.innerHTML = SHOP.groups.map(g => {
+        const storeName = getStoreNameById(g.StoreId) || (g.StoreId === 'unassigned' ? 'Unassigned' : g.StoreId);
+        const isUnassigned = (g.StoreId === 'unassigned');
+
+        // Group items by category (normalize to Title Case for display)
+        const categoriesMap = {};
+        const allCategories = new Set();
+        
+        // Helper to normalize category to Title Case
+        const normalizeCategory = (cat) => {
+          if (!cat || !cat.trim()) return 'Other';
+          return String(cat).trim().charAt(0).toUpperCase() + String(cat).trim().slice(1).toLowerCase();
+        };
+
+        g.Items.forEach(item => {
+          const cat = normalizeCategory(item.Category);
+          allCategories.add(cat);
+          if (!categoriesMap[cat]) categoriesMap[cat] = [];
+          categoriesMap[cat].push(item);
+        });
+
+        // Sort categories: use META.categories order, put unknown categories at the end
+        // Create lowercase set for case-insensitive matching
+        const metaCategoriesLower = new Set((META.categories || []).map(c => String(c || '').toLowerCase()));
+        const sortedCategories = (META.categories || []).filter(c => c && allCategories.has(c));
+        const unknownCategories = [...allCategories].filter(c => !metaCategoriesLower.has(String(c || '').toLowerCase())).sort();
+        const finalCategories = [...sortedCategories, ...unknownCategories];
+
+        const categoriesHtml = finalCategories.map(cat => {
+          const catItems = categoriesMap[cat] || [];
+          return `
+            <div style="margin-top: 12px;">
+              <div style="font-size: 13px; font-weight: 600; color: var(--accent); padding: 6px 0; border-bottom: 1px solid var(--line); margin-bottom: 8px;">
+                ${escapeHtml(cat || 'Other')}
+              </div>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                ${catItems.map(it => {
+                  const storeIdForItem = (g.StoreId === 'unassigned') ? '' : g.StoreId;
+                  return `
+                    <div class="item" style="padding:10px;">
+                      <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+                        <div>
+                          <div><strong>${escapeHtml(normalizeShopTitle_(it.IngredientNorm))}</strong> <span class="muted">x${escapeHtml(it.Count)}</span></div>
+                          <div class="muted">${(it.Examples||[]).map(x => escapeHtml(x)).join(' • ')}</div>
+                          <div class="muted">Qty: ${escapeHtml(shopQtyDisplay_(it) || '')} ${escapeHtml(it.Unit || '')}</div>
+                        </div>
+                        <div style="min-width:220px;">
+                          <label style="margin:0 0 6px 0;">Store</label>
+                          <select data-action="shop-item-store" data-ingredient="${escapeAttr(it.IngredientNorm)}" data-unit="${escapeAttr(it.Unit||'')}" data-storeid="${escapeAttr(storeIdForItem)}">
+                            ${storeOptionsHtml_(storeIdForItem)}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        return `
+          <details open class="item" style="padding:10px;">
+            <summary style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+              <span>${escapeHtml(storeName)} (${g.Items.length})</span>
+              <span class="actions" style="margin-left:auto;">
+                <button class="ghost" data-action="shop-print-store" data-storeid="${escapeAttr(g.StoreId)}">Print</button>
+              </span>
+            </summary>
+            <div style="margin-top:10px;">
+              ${categoriesHtml}
+              ${isUnassigned ? `<div class="muted" style="margin-top: 12px;">Unassigned items must be assigned a store before printing a complete by-store list.</div>` : ``}
+            </div>
+          </details>
+        `;
+      }).join('');
+    }
+
+    function persistShop_(){
+      try {
+        localStorage.setItem('foodieShoppingLast', JSON.stringify({ start: SHOP.start, end: SHOP.end, groups: SHOP.groups }));
+      } catch (_) {}
+    }
+    function loadPersistedShop_(){
+      try {
+        const raw = localStorage.getItem('foodieShoppingLast');
+        if (!raw) return;
+        const obj = JSON.parse(raw);
+        if (obj && Array.isArray(obj.groups)) {
+          SHOP.start = String(obj.start || '');
+          SHOP.end = String(obj.end || '');
+          renderShop_(obj.groups);
+        }
+      } catch (_) {}
+    }
+
+    async function buildShop(){
+      const start = document.getElementById('shopStart').value;
+      const days = Number(document.getElementById('shopDays').value || 14);
+      const end = addDays(start, days-1);
+      SHOP.start = start;
+      SHOP.end = end;
+
+      const out = document.getElementById('shopOut');
+      out.innerHTML = `<div class="muted">Generating...</div>`;
+      const res = await api('buildShoppingList', { start, end, excludeLeftovers: true });
+      if (!res.ok) { out.innerHTML = `<div class="muted">Error: ${escapeHtml(res.error||'')}</div>`; return; }
+
+      renderShop_(res.groups || []);
+      persistShop_();
+    }
+
+    function clearShopUi() {
+      SHOP.groups = [];
+      SHOP.start = '';
+      SHOP.end = '';
+      document.getElementById('shopOut').innerHTML = `<div class="muted">List cleared.</div>`;
+      persistShop_();
+    }
+
+    document.addEventListener('click', async (e) => {
+      const ps = e.target.closest('[data-action="shop-print-store"]');
+      if (ps) {
+        const storeId = String(ps.dataset.storeid || '');
+        if (storeId === 'unassigned') { alert('Please assign stores for unassigned items before printing.'); return; }
+        const g = (SHOP.groups || []).find(x => String(x.StoreId) === storeId);
+        if (!g) { alert('Nothing to print for this store.'); return; }
+        const storeName = getStoreNameById(storeId) || storeId;
+        const items = (g.Items||[]).map(it => ({
+          IngredientNorm: it.IngredientNorm,
+          QtyDisplay: shopQtyDisplay_(it),
+          QtyText: it.QtyText,
+          Unit: it.Unit
+        }));
+        await window.Foodie.printShopping(storeName, items);
+        return;
+      }
+    });
+
+    document.addEventListener('change', async (e) => {
+      const sel = e.target.closest('[data-action="shop-item-store"]');
+      if (!sel) return;
+      const ingredientNorm = String(sel.dataset.ingredient || '').trim();
+      const unit = String(sel.dataset.unit || '').trim();
+      const storeId = String(sel.value || '').trim();
+      if (!SHOP.start || !SHOP.end) {
+        alert('Please generate the shopping list first.');
+        return;
+      }
+      const res = await api('assignShoppingItemStore', { start: SHOP.start, end: SHOP.end, ingredientNorm, unit, storeId });
+      if (!res.ok) { alert(res.error||'Failed to assign store.'); return; }
+      // Refresh grouping immediately
+      await buildShop();
+    });
+
+    // ---------- pantry ----------
+    async function loadPantry(){
+      const q = (document.getElementById('pantrySearch').value || '').trim().toLowerCase();
+      const res = await api('listPantry', { q });
+      const box = document.getElementById('pantryList');
+      if (!res.ok) { box.innerHTML = `<div class="muted">Error: ${escapeHtml(res.error||'')}</div>`; return; }
+      const items = res.items || [];
+      window.__pantryItemsById = Object.create(null);
+      for (const it of items) { if (it && it.ItemId) window.__pantryItemsById[it.ItemId] = it; }
+      box.innerHTML = items.length ? items.map(it => `
+        <div class="item">
+          <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+            <div>
+              <div><strong>${escapeHtml(it.Name)}</strong> <span class="muted">${escapeHtml(it.QtyText||'')}</span></div>
+              ${it.Category ? `<div class="muted">Category: ${escapeHtml(it.Category)}</div>` : ''}
+              <div class="muted">${escapeHtml(getStoreNameById(it.StoreId)||it.StoreId||'')}</div>
+              <div class="muted">${escapeHtml(it.Notes||'')}</div>
+            </div>
+            <div class="actions">
+              <button class="ghost" data-action="pantry-edit" data-id="${escapeAttr(it.ItemId)}">Edit</button>
+              <button class="danger" data-action="pantry-del" data-id="${escapeAttr(it.ItemId)}">Delete</button>
+            </div>
+          </div>
+        </div>
+      `).join('') : `<div class="muted">No pantry items.</div>`;
+    }
+
+    
+    // ---------- calendar ----------
+    async function calSync(){
+      const start = (PLAN && PLAN.start) ? PLAN.start : document.getElementById('planStart').value;
+      const days = (PLAN && PLAN.days) ? Number(PLAN.days||14) : Number(document.getElementById('planDays').value || 14);
+      if (!start) { document.getElementById('calStatus').textContent = 'Select a plan start date first.'; return; }
+      const end = addDays(start, days-1);
+      const calNameEl = document.getElementById('calId');
+      const calName = (calNameEl && calNameEl.value ? calNameEl.value : 'Foodie Meal Planner').trim() || 'Foodie Meal Planner';
+
+      document.getElementById('calStatus').textContent = 'Syncing...';
+      const res = await api('calendarSyncRange', { start, end, calendarName: calName });
+      if (!res.ok) { document.getElementById('calStatus').textContent = `Error: ${res.error||''}`; return; }
+      document.getElementById('calStatus').textContent = `Synced. Created: ${res.created||0}, Updated: ${res.updated||0}`;
+    }
+
+
+    // ---------- bindings ----------
+    function fillJumpLetters(){
+      const sel = document.getElementById('jumpLetter');
+      const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+      sel.innerHTML = `<option value="">Jump A–Z</option>` + letters.map(l => `<option value="${l.toLowerCase()}">${l}</option>`).join('');
+    }
+
+    function collapseExpandAll(containerId, open){
+      const box = document.getElementById(containerId);
+      box.querySelectorAll('details').forEach(d => d.open = !!open);
+    }
+
+    
+    function bindUi() {
+      // Recipes
+      document.getElementById('btnAddRecipe').addEventListener('click', openRecipeModalNew);
+      document.getElementById('btnRefresh').addEventListener('click', resetAndLoadRecipes);
+
+      document.getElementById('btnModalClose').addEventListener('click', closeRecipeModal);
+      document.getElementById('btnModalToggleEdit').addEventListener('click', toggleRecipeModalMode);
+      document.getElementById('btnSaveRecipeFull').addEventListener('click', saveRecipeAndIngredients);
+      document.getElementById('btnDeleteRecipe').addEventListener('click', deleteRecipeUi);
+    // Print the current recipe with scaled quantities (from modal)
+    async function printRecipeWithQuantities() {
+      const title = document.getElementById('rTitle').value || 'Untitled Recipe';
+      const instructions = document.getElementById('rInstructions').value || '';
+      const url = document.getElementById('rUrl').value || '';
+      
+      // Helper to clean date strings from QtyText
+      const cleanQtyText = (qtyText) => {
+        if (!qtyText) return '';
+        // Remove date strings that were mistakenly parsed from fractions
+        const datePattern = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{4}\s+\d{2}:\d{2}:\d{2}\s+GMT[-+]\d{4}\s+\([^)]+\)\s*/i;
+        return qtyText.replace(datePattern, '').trim();
+      };
+      
+      // Build ingredients list from current ING_ROWS (includes any scaling)
+      const ingredientsHtml = ING_ROWS.map(r => {
+        const qtyNum = r.QtyNum !== '' ? r.QtyNum : '';
+        const unit = r.Unit || '';
+        const rawQtyText = r.QtyText || '';
+        const cleanText = cleanQtyText(rawQtyText);
+        const name = r.IngredientRaw || r.IngredientNorm || '';
+        
+        // Format: When scaled (RECIPE_SCALE !== 1.0), always use QtyNum + Unit
+        // When NOT scaled, prefer clean QtyText if it exists, otherwise use QtyNum + unit
+        let qtyDisplay = '';
+        if (RECIPE_SCALE !== 1.0) {
+          // Always use QtyNum and Unit when scaled
+          if (qtyNum && unit) {
+            qtyDisplay = `${qtyNum} ${unit}`;
+          } else if (qtyNum) {
+            qtyDisplay = qtyNum;
+          } else if (unit) {
+            qtyDisplay = unit;
+          }
+        } else {
+          // Not scaled - prefer clean QtyText if it exists
+          if (cleanText && cleanText.length > 0) {
+            qtyDisplay = cleanText;
+          } else if (qtyNum && unit) {
+            qtyDisplay = `${qtyNum} ${unit}`;
+          } else if (qtyNum) {
+            qtyDisplay = qtyNum;
+          } else if (unit) {
+            qtyDisplay = unit;
+          }
+        }
+        
+        return `<div style="display:flex;gap:8px;margin-bottom:4px;">
+          <span style="min-width:80px;text-align:right;font-weight:600;">${escapeHtml(qtyDisplay)}</span>
+          <span>${escapeHtml(name)}</span>
+        </div>`;
+      }).join('');
+      
+      // Build print-friendly HTML
+      const printHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+    <meta charset="UTF-8">
+          <title>${escapeHtml(title)}</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; color: #000; }
+            h1 { border-bottom: 2px solid #333; padding-bottom: 8px; font-size: 24px; }
+            h3 { margin-top: 20px; margin-bottom: 10px; font-size: 16px; }
+            pre { white-space: pre-wrap; font-family: inherit; line-height: 1.6; }
+            @media print {
+              body { padding: 0; }
+              h1 { font-size: 20px; }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(title)}</h1>
+          ${url ? `<p><a href="${escapeAttr(url)}">${escapeHtml(url)}</a></p>` : ''}
+          ${instructions ? `<div><h3>Instructions</h3><pre>${escapeHtml(instructions)}</pre></div>` : ''}
+          <div><h3>Ingredients</h3>${ingredientsHtml}</div>
+          <script>window.onload = function() { window.print(); }<\/script>
+        </body>
+        </html>
+      `;
+      
+      // Open print window
+      const printWindow = window.open('', '_blank');
+      printWindow.document.write(printHtml);
+      printWindow.document.close();
+    }
+
+    // Print recipe from database (used when not in modal context)
+    async function printRecipeFromDb(recipeId) {
+      await window.Foodie.printRecipe(recipeId);
+    }
+
+    document.getElementById('btnPrintRecipe').addEventListener('click', async () => {
+      if (CURRENT_RECIPE_ID) {
+        // Apply current scale to display before printing (force refresh)
+        applyCurrentScaleToDisplay(true);
+        // Print with current scaled quantities from modal
+        await printRecipeWithQuantities();
+      }
+    });
+    
+    // View mode print button
+    document.getElementById('btnPrintRecipeView').addEventListener('click', async () => {
+      if (CURRENT_RECIPE_ID) {
+        // Apply current scale to display before printing (force refresh)
+        applyCurrentScaleToDisplay(true);
+        // Print with current scaled quantities from modal
+        await printRecipeWithQuantities();
+      }
+    });
+      document.getElementById('btnAddIngredientRow').addEventListener('click', () => {
+        if (recipeModalMode !== 'view') addIngredientRow();
+      });
+      document.getElementById('btnCategorizeAll').addEventListener('click', async () => {
+        if (recipeModalMode !== 'view') await categorizeAllIngredients();
+      });
+
+      document.getElementById('recipesList').addEventListener('click', async (e) => {
+        const v = e.target.closest('[data-action="recipe-view"]');
+        if (v) { await openRecipeModalView(v.dataset.rid); return; }
+        const ed = e.target.closest('[data-action="recipe-edit"]');
+        if (ed) { await openRecipeModalEdit(ed.dataset.rid); return; }
+      });
+
+      document.getElementById('recipeSearch').addEventListener('input', async () => {
+        CURRENT_QUERY = (document.getElementById('recipeSearch').value || '').trim().toLowerCase();
+        await resetAndLoadRecipes();
+      });
+
+      // Jump A-Z functionality
+      document.getElementById('jumpLetter').addEventListener('change', async (e) => {
+        const letter = e.target.value;
+        CURRENT_QUERY = letter;
+        await resetAndLoadRecipes();
+      });
+
+      // Meal picker
+      document.getElementById('btnMealPickerClose').addEventListener('click', closeMealPicker);
+      document.getElementById('mpSearch').addEventListener('input', async () => {
+        MP.q = (document.getElementById('mpSearch').value || '').trim().toLowerCase();
+        await mealPickerLoad(true);
+      });
+      document.getElementById('mpClearMeal').addEventListener('click', async () => {
+        if (!MP.open) return;
+        await api('upsertPlanMeal', { date: MP.date, slot: MP.slot, meal: null });
+        closeMealPicker();
+        await loadPlansIntoUi(PLAN.start, PLAN.days);
+      });
+      document.getElementById('mpList').addEventListener('click', async (e) => {
+        const sel = e.target.closest('[data-action="mp-select"]');
+        if (!sel || !MP.open) return;
+        const meal = { RecipeId: sel.dataset.rid, Title: sel.dataset.title };
+        await api('upsertPlanMeal', { date: MP.date, slot: MP.slot, meal });
+        closeMealPicker();
+        await loadPlansIntoUi(PLAN.start, PLAN.days);
+      });
+
+      // Planner / Bulk planner
+      document.getElementById('btnPlanLoad').addEventListener('click', async () => {
+        const start = document.getElementById('planStart').value;
+        if (!start) return;
+        
+        // Check if end date is provided and extend the range
+        const endInput = document.getElementById('planEnd').value;
+        let days = Number(document.getElementById('planDays').value || 1);
+        
+        if (endInput) {
+          // Calculate days from start to end
+          const [sy, sm, sd] = start.split('-').map(Number);
+          const [ey, em, ed] = endInput.split('-').map(Number);
+          const startDate = new Date(sy, sm - 1, sd);
+          const endDate = new Date(ey, em - 1, ed);
+          const diffTime = endDate.getTime() - startDate.getTime();
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+          if (diffDays > days) {
+            days = diffDays;
+            document.getElementById('planDays').value = days;
+          }
+        }
+        
+        await loadPlansIntoUi(start, days);
+      });
+      document.getElementById('btnPlanExpandAll').addEventListener('click', () => {
+        document.querySelectorAll('#planList details').forEach(d => d.open = true);
+      });
+      document.getElementById('btnPlanCollapseAll').addEventListener('click', () => {
+        document.querySelectorAll('#planList details').forEach(d => d.open = false);
+      });
+
+      // Bulk planner handlers
+      document.getElementById('btnBulkLoad').addEventListener('click', async () => {
+        const start = document.getElementById('bulkStart').value;
+        if (!start) return;
+        
+        // Check if end date is provided and extend the range
+        const endInput = document.getElementById('bulkEnd').value;
+        let days = Number(document.getElementById('bulkDays').value || 14);
+        
+        if (endInput) {
+          // Calculate days from start to end
+          const [sy, sm, sd] = start.split('-').map(Number);
+          const [ey, em, ed] = endInput.split('-').map(Number);
+          const startDate = new Date(sy, sm - 1, sd);
+          const endDate = new Date(ey, em - 1, ed);
+          const diffTime = endDate.getTime() - startDate.getTime();
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+          if (diffDays > days) {
+            days = diffDays;
+            document.getElementById('bulkDays').value = days;
+          }
+        }
+        
+        await loadPlansIntoUi(start, days);
+      });
+      document.getElementById('btnBulkExpandAll').addEventListener('click', () => {
+        document.querySelectorAll('#bulkList details').forEach(d => d.open = true);
+      });
+      document.getElementById('btnBulkCollapseAll').addEventListener('click', () => {
+        document.querySelectorAll('#bulkList details').forEach(d => d.open = false);
+      });
+
+      document.getElementById('planList').addEventListener('click', async (e) => {
+        const sel = e.target.closest('[data-action="select-meal"]');
+        if (sel) { openMealPicker(sel.dataset.date, sel.dataset.slot); return; }
+
+        const v = e.target.closest('[data-action="planner-view"]');
+        if (v && v.dataset.rid) { await openRecipeModalView(v.dataset.rid); return; }
+
+        const ed = e.target.closest('[data-action="planner-edit"]');
+        if (ed && ed.dataset.rid) { await openRecipeModalEdit(ed.dataset.rid); return; }
+
+        const pp = e.target.closest('[data-action="planner-print"]');
+        if (pp && pp.dataset.rid) { 
+          await openRecipeModalView(pp.dataset.rid);
+          // Apply current scale to display before printing (force refresh)
+          applyCurrentScaleToDisplay(true);
+          printRecipeWithQuantities();
+          return; 
+        }
+
+        const sw = e.target.closest('[data-action="swap"]');
+        if (sw) {
+          await api('swapPlanMeals', { date: sw.dataset.date, a: sw.dataset.a, b: sw.dataset.b });
+          await loadPlansIntoUi(PLAN.start, PLAN.days);
+          return;
+        }
+
+        const left = e.target.closest('[data-action="planner-leftovers"]');
+        if (left) {
+          const date = left.dataset.date;
+          const slot = left.dataset.slot;
+          const p = PLAN.plansByDate[date] || {};
+          const cur = p[slot] || null;
+          const currently = !!(cur && cur.UseLeftovers);
+
+          if (currently) {
+            // Turn off leftovers
+            await api('upsertPlanMeal', { date, slot, meal: { RecipeId: cur.RecipeId || '', Title: cur.Title || '', UseLeftovers: false, From: '' } });
+            await loadPlansIntoUi(PLAN.start, PLAN.days);
+            return;
+          }
+
+          // Turn on leftovers - allow for empty slots too
+          const source = await pickLeftoversSourceAsync_(date, slot);
+          if (source === null) return; // cancelled
+          if (!source) {
+            alert('Please select a source meal for leftovers.');
+            return;
+          }
+          
+          // Get the string value for parsing and the recipe details
+          const sourceValue = (typeof source === 'string') ? source : source.value;
+          const sourceRecipeId = source.recipeId || '';
+          const sourceMealTitle = source.title || '';
+          
+          // Parse the source string to get date and slot
+          const match = sourceValue.match(/^(\d{4}-\d{2}-\d{2})\s+(\w+)\s+[—–-]\s+(.+)$/);
+          const sourceDate = match ? match[1] : '';
+          const sourceSlot = match ? match[2] : '';
+          
+          // Create the leftovers meal using the SOURCE meal's RecipeId and Title
+          // For empty slots, the title indicates it's a leftovers placeholder
+          const updatedMeal = {
+            RecipeId: sourceRecipeId,
+            Title: sourceMealTitle,
+            UseLeftovers: true,
+            From: sourceValue
+          };
+          
+          console.log('Saving leftovers meal:', { date, slot, meal: updatedMeal });
+          
+          const res = await api('upsertPlanMeal', { date, slot, meal: updatedMeal });
+          console.log('API response:', res);
+          
+          // Debug: Show what was saved
+          if (res && res.ok) {
+            console.log('Leftovers meal saved successfully!');
+          } else {
+            alert('Error saving leftovers: ' + (res.error || 'Unknown error'));
+            return;
+          }
+          
+          await loadPlansIntoUi(PLAN.start, PLAN.days);
+          return;
+        }
+      });
+
+      // Calendar
+      document.getElementById('btnCalSync').addEventListener('click', calSync);
+
+      // Shopping list
+      document.getElementById('btnBuildShop').addEventListener('click', buildShop);
+      document.getElementById('btnClearShop').addEventListener('click', clearShopUi);
+      document.getElementById('btnPrintShopAll').addEventListener('click', () => window.Foodie.printShoppingList && window.Foodie.printShoppingList());
+
+      // Pantry
+      document.getElementById('btnPantryRefresh').addEventListener('click', loadPantry);
+      document.getElementById('btnPantryAdd').addEventListener('click', async () => {
+        const r = await pantryModal_({ title: 'Add Pantry Item', initial: {} });
+        if (r && r.ok) await loadPantry();
+      });
+      document.getElementById('pantryList').addEventListener('click', async (e) => {
+        const ed = e.target.closest('[data-action="pantry-edit"]');
+        if (ed) {
+          const id = String(ed.dataset.id || '').trim();
+          const cur = (window.__pantryItemsById && id && window.__pantryItemsById[id]) ? window.__pantryItemsById[id] : { ItemId: id };
+          const r = await pantryModal_({ title: 'Edit Pantry Item', initial: {
+            ItemId: cur.ItemId || id,
+            Name: cur.Name || '',
+            QtyNum: (cur.QtyNum === null || cur.QtyNum === undefined) ? null : cur.QtyNum,
+            Unit: cur.Unit || '',
+            QtyText: cur.QtyText || '',
+            Category: cur.Category || '',
+            StoreId: cur.StoreId || '',
+            Notes: cur.Notes || ''
+          }});
+          if (r && r.ok) await loadPantry();
+          return;
+        }
+        const del = e.target.closest('[data-action="pantry-del"]');
+        if (del) {
+          const id = del.dataset.id;
+          if (!id) return;
+          if (!confirm('Delete pantry item?')) return;
+          await api('deletePantryItem', { PantryId: id });
+          await loadPantry();
+          return;
+        }
+      });
+
+      // Stores
+      document.getElementById('btnReloadStores').addEventListener('click', loadStores);
+      document.getElementById('btnAddStore').addEventListener('click', async () => {
+        const name = (document.getElementById('newStoreName').value || '').trim();
+        const priority = Number(document.getElementById('newStorePriority').value || 10);
+        if (!name) { document.getElementById('storeStatus').textContent = 'Enter a store name.'; return; }
+        const res = await api('addStore', { name, priority });
+        if (!res.ok) { document.getElementById('storeStatus').textContent = `Error: ${res.error||''}`; return; }
+        document.getElementById('newStoreName').value = '';
+        await loadStores();
+      });
+
+      // Store list delete handler
+      document.getElementById('storeList').addEventListener('click', async (e) => {
+        const del = e.target.closest('[data-action="store-delete"]');
+        if (del) {
+          const storeId = del.dataset.storeid;
+          const storeName = del.dataset.storename;
+          if (!confirm(`Delete store "${storeName}"? This may affect ingredients assigned to this store.`)) return;
+          const res = await api('deleteStore', { storeId });
+          if (!res.ok) { document.getElementById('storeStatus').textContent = `Error: ${res.error||''}`; return; }
+          document.getElementById('storeStatus').textContent = `Store "${storeName}" deleted.`;
+          await loadStores();
+          return;
+        }
+      });
+
+      // Admin: Export/Import
+      document.getElementById('btnExportData').addEventListener('click', async () => {
+        document.getElementById('adminStatus').textContent = 'Exporting...';
+        const res = await window.Foodie.exportData();
+        if (!res.ok) { document.getElementById('adminStatus').textContent = `Error: ${res.error||''}`; return; }
+        document.getElementById('adminStatus').textContent = 'Export complete.';
+        setTimeout(() => { document.getElementById('adminStatus').textContent = ''; }, 3000);
+      });
+
+      document.getElementById('btnImportData').addEventListener('click', async () => {
+        if (!confirm('Import will replace your current data. Continue?')) return;
+        document.getElementById('adminStatus').textContent = 'Importing...';
+        const res = await window.Foodie.importData();
+        if (!res.ok) { document.getElementById('adminStatus').textContent = `Error: ${res.error||''}`; return; }
+        document.getElementById('adminStatus').textContent = 'Import complete. Reloading...';
+        // Reload page to pick up new data
+        window.location.reload();
+      });
+
+      // Admin: Fix all recipe categories
+      document.getElementById('btnFixCategories').addEventListener('click', async () => {
+        if (!confirm('This will re-categorize all ingredients in all recipes and save them to the database. Continue?')) return;
+        
+        document.getElementById('fixCategoriesStatus').textContent = 'Loading recipes...';
+        const statusEl = document.getElementById('fixCategoriesStatus');
+        
+        try {
+          // Get all recipes
+          const res = await api('listRecipesAll', {});
+          if (!res.ok) throw new Error(res.error || 'Failed to load recipes');
+          
+          const recipes = res.recipes || [];
+          if (!recipes.length) {
+            statusEl.textContent = 'No recipes found.';
+            return;
+          }
+          
+          let totalFixed = 0;
+          let totalErrors = 0;
+          
+          for (const recipe of recipes) {
+            statusEl.textContent = `Processing: ${recipe.Title}...`;
+            
+            // Load ingredients for this recipe
+            const ingRes = await api('listRecipeIngredients', { recipeId: recipe.RecipeId });
+            if (!ingRes.ok) {
+              totalErrors++;
+              continue;
+            }
+            
+            const items = ingRes.items || [];
+            if (!items.length) continue;
+            
+            // Categorize each ingredient
+            for (let i = 0; i < items.length; i++) {
+              const item = items[i];
+              const name = item.IngredientRaw || item.IngredientNorm;
+              if (!name || name.trim().length < 2) continue;
+              
+              const catRes = await api('classifyIngredient', { name });
+              if (catRes.ok && catRes.category) {
+                items[i].Category = catRes.category;
+              } else {
+                items[i].Category = items[i].Category || 'Other';
+              }
+              
+              // Small delay to avoid overwhelming the API
+              await new Promise(r => setTimeout(r, 5));
+            }
+            
+            // Save back to database
+            const saveRes = await api('upsertRecipeWithIngredients', {
+              recipe: { RecipeId: recipe.RecipeId },
+              items: items.map(x => ({
+                IngredientNorm: x.IngredientNorm || '',
+                IngredientRaw: x.IngredientRaw || '',
+                Notes: x.Notes || '',
+                QtyNum: (x.QtyNum === '' || x.QtyNum === null || x.QtyNum === undefined) ? null : Number(x.QtyNum),
+                QtyText: x.QtyText || '',
+                StoreId: x.StoreId || '',
+                Unit: x.Unit || '',
+                Category: x.Category || ''
+              }))
+            });
+            
+            if (saveRes.ok) {
+              totalFixed++;
+            } else {
+              totalErrors++;
+            }
+            
+            // Small delay between recipes
+            await new Promise(r => setTimeout(r, 10));
+          }
+          
+          statusEl.textContent = `Done! Fixed ${totalFixed} recipe(s).${totalErrors > 0 ? ` ${totalErrors} errors.` : ''}`;
+          
+          // Refresh the recipes list
+          await resetAndLoadRecipes();
+          
+        } catch (e) {
+          statusEl.textContent = `Error: ${e.message}`;
+        }
+      });
+    }
+
+
+    // ---------- init ----------
+    async function init() {
+      bindUi();
+
+      // Load ingredient categories list from DB (Admin-manageable). Fall back to defaults.
+      try {
+        const catRes = await api('getIngredientCategories', {});
+        if (catRes && catRes.ok && Array.isArray(catRes.categories) && catRes.categories.length) {
+          META.categories = [''].concat(catRes.categories);
+          const ta = document.getElementById('adminCategoriesText');
+          if (ta) ta.value = catRes.categories.join('\n');
+        } else {
+          const ta = document.getElementById('adminCategoriesText');
+          if (ta) ta.value = DEFAULT_ING_CATEGORIES.join('\n');
+        }
+      } catch (e) {
+        const ta = document.getElementById('adminCategoriesText');
+        if (ta) ta.value = DEFAULT_ING_CATEGORIES.join('\n');
+      }
+
+      fillJumpLetters();
+
+      const today = ymd(new Date());
+      document.getElementById('planStart').value = today;
+      document.getElementById('bulkStart').value = today;
+      document.getElementById('shopStart').value = today;
+
+      try { await loadStores(); } catch (_) {}
+      await resetAndLoadRecipes();
+      await loadPantry();
+
+      // default: load a 14-day range starting today
+      await loadPlansIntoUi(today, Number(document.getElementById('planDays').value || 14));
+    }
+
+
+    window.addEventListener('load', init);
+
+  </script>
+
+<!-- Pantry item modal (replaces window.prompt, which is not supported in this Electron configuration) -->
+<div id="pantryModalOverlay" style="position:fixed;left:0;top:0;right:0;bottom:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.55);z-index:9999;">
+  <div style="background:#ffffff;color:#111111;min-width:360px;max-width:520px;width:90%;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,0.35);padding:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;">
+      <div id="pantryModalTitle" style="font-size:16px;font-weight:700;">Pantry Item</div>
+      <button id="pantryModalClose" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;">X</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <label style="grid-column:1 / span 2;">
+        <div style="font-size:12px;margin-bottom:4px;">Name</div>
+        <input id="pantryModalName" type="text" style="width:100%;padding:8px;border:1px solid #bbb;border-radius:6px;background:#fff;color:#111;" />
+      </label>
+      <label>
+        <div style="font-size:12px;margin-bottom:4px;">Qty (number)</div>
+        <input id="pantryModalQtyNum" type="text" inputmode="decimal" style="width:100%;padding:8px;border:1px solid #bbb;border-radius:6px;background:#fff;color:#111;" />
+      </label>
+      <label>
+        <div style="font-size:12px;margin-bottom:4px;">Unit</div>
+        <input id="pantryModalUnit" type="text" style="width:100%;padding:8px;border:1px solid #bbb;border-radius:6px;background:#fff;color:#111;" />
+      </label>
+      <label>
+        <div style="font-size:12px;margin-bottom:4px;">Category</div>
+        <select id="pantryModalCategory" style="width:100%;padding:8px;border:1px solid #bbb;border-radius:6px;background:#fff;color:#111;">
+        </select>
+      </label>
+      <label style="grid-column:1 / span 2;">
+        <div style="font-size:12px;margin-bottom:4px;">Qty text (optional)</div>
+        <input id="pantryModalQtyText" type="text" style="width:100%;padding:8px;border:1px solid #bbb;border-radius:6px;background:#fff;color:#111;" />
+      </label>
+      <label>
+        <div style="font-size:12px;margin-bottom:4px;">StoreId (optional)</div>
+        <input id="pantryModalStoreId" type="text" style="width:100%;padding:8px;border:1px solid #bbb;border-radius:6px;background:#fff;color:#111;" />
+      </label>
+      <label>
+        <div style="font-size:12px;margin-bottom:4px;">Notes (optional)</div>
+        <input id="pantryModalNotes" type="text" style="width:100%;padding:8px;border:1px solid #bbb;border-radius:6px;background:#fff;color:#111;" />
+      </label>
+    </div>
+    <div id="pantryModalError" style="margin-top:10px;color:#b00020;font-size:12px;display:none;"></div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
+      <button id="pantryModalCancel" style="padding:8px 12px;font-weight:700;background:#6b7280;border:none;border-radius:6px;cursor:pointer;color:#fff;">Cancel</button>
+      <button id="pantryModalSave" style="padding:8px 12px;font-weight:700;background:#4da3ff;border:none;border-radius:6px;cursor:pointer;color:#fff;">Save</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
