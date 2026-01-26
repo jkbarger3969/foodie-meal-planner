@@ -2,24 +2,21 @@ const { google } = require('googleapis');
 const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
+const crypto = require('crypto');
 
 /**
- * Google Calendar Integration for Foodie Meal Planner
+ * Google Calendar Integration for Foodie Meal Planner (PKCE Flow)
  * 
- * This module provides direct integration with Google Calendar API.
- * It handles OAuth2 authentication and calendar event management.
+ * Uses "Public Client" mode (PKCE) for secure desktop authentication.
+ * No Client Secret is required or stored.
  */
 
-// OAuth2 client instance
+// Production Client ID (Safe to embed for Native Apps)
+const CLIENT_ID = '539306512404-f6cphplmmlqf1ldakkgvuobq6gbrpq84.apps.googleusercontent.com';
+const REDIRECT_URI = 'http://localhost:12500'; // Loopback IP for desktop auth
+
 let oauth2Client = null;
 let calendar = null;
-
-// Paths for storing credentials and tokens (lazy-loaded to ensure app.setName() is applied first)
-function getCredentialsPath() {
-  const credPath = path.join(app.getPath('userData'), 'google-credentials.json');
-  console.log('[google-calendar] Credentials path:', credPath);
-  return credPath;
-}
 
 function getTokenPath() {
   const tokenPath = path.join(app.getPath('userData'), 'google-token.json');

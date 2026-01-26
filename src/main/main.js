@@ -859,7 +859,8 @@ class CompanionServer {
     if (!client) return;
 
     try {
-      const { name, qtyText, qtyNum, unit, category, store, barcode, notes } = message.data;
+      // Note: rename 'store' to 'storeName' to avoid shadowing the module-level 'store' (electron-store)
+      const { name, qtyText, qtyNum, unit, category, store: storeName, barcode, notes } = message.data;
 
       console.log(`📷 Barcode scanned from ${client.deviceType}: ${name} (${barcode})`);
 
@@ -871,8 +872,9 @@ class CompanionServer {
           qtyText: qtyText,
           qtyNum: qtyNum,
           unit: unit,
+          category: category,
           notes: notes || `Scanned barcode: ${barcode}`,
-          storeId: store || null
+          storeId: storeName || null
         },
         store
       });

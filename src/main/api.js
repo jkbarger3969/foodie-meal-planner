@@ -2633,7 +2633,7 @@ function assignShoppingItemStore(payload) {
   const ingredientNorm = normLower_((payload && payload.ingredientNorm) || '');
   const storeId = String(payload && payload.storeId || '').trim();
   const sourceIds = Array.isArray(payload && payload.sourceIds) ? payload.sourceIds : [];
-  
+
   if (!ingredientNorm && sourceIds.length === 0) return err_('ingredientNorm or sourceIds required.');
 
   let updatedCount = 0;
@@ -3284,33 +3284,35 @@ async function googleCalendarSyncRange(payload, store) {
   }
 }
 
-async function initGoogleCalendar(payload) {
+// This function is now simplified to just verify authentication
+async function initGoogleCalendar() {
   try {
-    const credentials = payload && payload.credentials;
-    if (!credentials) return err_('credentials required');
+    // 1. Initialize (loads token if exists)
+    await googleCal.initializeGoogleCalendar();
 
-    const saveResult = googleCal.saveCredentials(credentials);
-    if (!saveResult.ok) return saveResult;
-
-    const initResult = await googleCal.initializeGoogleCalendar(credentials);
-    return initResult;
+    // 2. Check if valid
+    const isAuth = googleCal.isAuthenticated();
+    return ok_({
+      authenticated: isAuth,
+      // We no longer need "credentialsLoaded" state, if we are initialized we are ready to login
+      credentialsLoaded: true
+    });
   } catch (error) {
     return err_(error.message || 'Failed to initialize Google Calendar');
   }
 }
 
+// This function is now updated to use the new PKCE getAuthUrl and open it
 async function getGoogleAuthUrl() {
   try {
-    const credResult = googleCal.loadCredentials();
-    if (!credResult.ok) {
-      return err_('No credentials found. Please upload credentials first.');
-    }
+    // 1. Get the PKCE Auth URL
+    const authUrl = googleCal.getAuthUrl();
+    if (!authUrl) return err_('Failed to generate auth URL');
 
-    await googleCal.initializeGoogleCalendar(credResult.credentials);
-    const url = googleCal.getAuthUrl();
-
-    if (!url) return err_('Failed to generate auth URL');
-    return ok_({ url });
+    // 2. Open it in default browser (this part would typically be handled by ipcMain.handle in Electron)
+    // For a pure backend function, we just return the URL.
+    // The client-side would then open this URL.
+    return ok_({ url: authUrl });
   } catch (error) {
     return err_(error.message || 'Failed to get auth URL');
   }
