@@ -461,12 +461,31 @@ class CompanionServer {
         }
       }
 
+      // CRITICAL: If we have no items to send, send a message that tells iPhone to keep its local data
+      // This prevents clearing the shopping list when desktop has no plan or connection issues
+      if (items.length === 0) {
+        client.ws.send(JSON.stringify({
+          type: 'shopping_list',
+          data: [],
+          version: null, // No version = don't replace, just acknowledge
+          forceReplace: false, // Don't replace if iPhone has data
+          timestamp: new Date().toISOString()
+        }));
+        console.log(`📤 Sent empty shopping list to ${client.deviceType} (iPhone will keep local data)`);
+        return;
+      }
+
+      // Generate version for non-empty lists
+      const version = `${Date.now()}-${items.length}`;
+
       client.ws.send(JSON.stringify({
         type: 'shopping_list',
         data: items,
+        version: version,
+        forceReplace: false, // On reconnect, merge don't replace
         timestamp: new Date().toISOString()
       }));
-      console.log(`📤 Sent ${items.length} shopping items to ${client.deviceType}`);
+      console.log(`📤 Sent ${items.length} shopping items to ${client.deviceType} (version: ${version})`);
     } catch (error) {
       console.error('Error sending shopping list:', error);
     }
@@ -930,14 +949,9 @@ class CompanionServer {
       });
 
       if (!planResult || !planResult.ok || !Array.isArray(planResult.plans) || planResult.plans.length === 0) {
-        // No meal plan for today - send empty list
-        const sentCount = this.pushToDeviceType('iphone', {
-          type: 'shopping_list_update',
-          data: [],
-          timestamp: new Date().toISOString()
-        });
-        console.log(`📤 Pushed empty shopping list (no meal plan for today)`);
-        return sentCount;
+        // No meal plan for today - DON'T send empty list (would clear iPhone's data)
+        console.log(`📤 No meal plan for today - not sending to iPhones (preserves existing data)`);
+        return 0;
       }
 
       const plan = planResult.plans[0];
@@ -949,14 +963,9 @@ class CompanionServer {
       if (plan.Dinner?.RecipeId) recipeIds.push(plan.Dinner.RecipeId);
 
       if (recipeIds.length === 0) {
-        // Meal plan exists but no recipes - send empty list
-        const sentCount = this.pushToDeviceType('iphone', {
-          type: 'shopping_list_update',
-          data: [],
-          timestamp: new Date().toISOString()
-        });
-        console.log(`📤 Pushed empty shopping list (no recipes in today's plan)`);
-        return sentCount;
+        // Meal plan exists but no recipes - DON'T send empty list
+        console.log(`📤 No recipes in today's plan - not sending to iPhones (preserves existing data)`);
+        return 0;
       }
 
       // Get all ingredients for all recipes
@@ -987,13 +996,18 @@ class CompanionServer {
         }
       }
 
+      // Generate version identifier
+      const version = `${Date.now()}-${allIngredients.length}`;
+
       const sentCount = this.pushToDeviceType('iphone', {
         type: 'shopping_list_update',
         data: allIngredients,
+        version: version,
+        forceReplace: true, // This is a fresh generation, so replace
         timestamp: new Date().toISOString()
       });
 
-      console.log(`📤 Pushed shopping list (${allIngredients.length} items from ${recipeIds.length} recipes) to all iPhones`);
+      console.log(`📤 Pushed shopping list (${allIngredients.length} items from ${recipeIds.length} recipes, version: ${version}) to all iPhones`);
 
       return sentCount;
     } catch (error) {
@@ -1005,10 +1019,17 @@ class CompanionServer {
   /**
    * Push pre-formatted shopping list items to all connected iPhones
    * This is used when the renderer has already generated a shopping list
+   * @param {Array} items - Shopping list items
+   * @param {Object} options - Optional settings
+   * @param {boolean} options.forceReplace - If true, tells iPhone to replace entire list
    */
-  async pushShoppingListItems(items) {
+  async pushShoppingListItems(items, options = {}) {
     console.log('🔍 pushShoppingListItems: Starting with', items.length, 'items');
     try {
+      // Generate a version identifier based on current timestamp and item count
+      // This allows iPhone to track which version of the list it has
+      const version = `${Date.now()}-${items.length}`;
+      
       // Format items for iOS app
       const formattedItems = items.map((item, idx) => ({
         ItemId: item.id || `item-${idx}`,
@@ -1023,10 +1044,12 @@ class CompanionServer {
       const sentCount = this.pushToDeviceType('iphone', {
         type: 'shopping_list_update',
         data: formattedItems,
+        version: version,
+        forceReplace: options.forceReplace || false,
         timestamp: new Date().toISOString()
       });
 
-      console.log(`📤 Pushed ${formattedItems.length} shopping items to ${sentCount} iPhone(s)`);
+      console.log(`📤 Pushed ${formattedItems.length} shopping items to ${sentCount} iPhone(s) (version: ${version})`);
       return sentCount;
     } catch (error) {
       console.error('Error pushing shopping list items:', error);

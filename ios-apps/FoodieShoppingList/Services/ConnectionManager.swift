@@ -33,9 +33,9 @@ class ConnectionManager: NSObject, ObservableObject, URLSessionWebSocketDelegate
     // Geofencing for "Store Senses"
     private let locationManager = CLLocationManager()
     private let monitoredStores: [String: CLLocationCoordinate2D] = [
-        "Kroger": CLLocationCoordinate2D(latitude: 33.7490, longitude: -84.3880), // Mock coordinates
-        "Publix": CLLocationCoordinate2D(latitude: 33.7500, longitude: -84.3900),
-        "Whole Foods": CLLocationCoordinate2D(latitude: 33.7480, longitude: -84.3850)
+        "Kroger": CLLocationCoordinate2D(latitude: 34.35201064556783, longitude: -84.05382156342527),
+        "Publix": CLLocationCoordinate2D(latitude: 34.35356956534028, longitude: -84.04455184890703),
+        "Costco": CLLocationCoordinate2D(latitude: 34.221834062203186, longitude: -84.11322934468497)
     ]
     
     // Network monitoring for auto-reconnect
@@ -113,7 +113,12 @@ class ConnectionManager: NSObject, ObservableObject, URLSessionWebSocketDelegate
             return
         }
         
-        disconnect() // Clean up any existing connection
+        // Clean up existing connection without changing isConnected state
+        // (prevents UI flashing during reconnect attempts)
+        stopPingTimer()
+        stopReconnectTimer()
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
         
         var request = URLRequest(url: url)
         request.setValue(UIDevice.current.identifierForVendor?.uuidString ?? "unknown", forHTTPHeaderField: "X-Device-ID")
@@ -186,16 +191,24 @@ class ConnectionManager: NSObject, ObservableObject, URLSessionWebSocketDelegate
             case .failure(let error):
                 print("❌ WebSocket error: \(error.localizedDescription)")
                 DispatchQueue.main.async {
+                    let wasConnected = self?.isConnected ?? false
                     self?.isConnected = false
-                    self?.syncStatus = .failed("Connection lost")
                     
-                    // Clear error after 3 seconds
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                        if case .failed = self?.syncStatus {
-                            self?.syncStatus = .idle
+                    // Only show "Connection lost" error if we WERE connected before
+                    // This prevents flashing errors when simply offline or desktop not running
+                    if wasConnected {
+                        self?.syncStatus = .failed("Connection lost")
+                        
+                        // Clear error after 3 seconds
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            if case .failed = self?.syncStatus {
+                                self?.syncStatus = .idle
+                            }
                         }
                     }
+                    // If we were never connected, just stay in idle state (shows "Offline" in UI)
                     
+                    // Still attempt to reconnect silently in background
                     self?.scheduleReconnect()
                 }
             }
@@ -212,13 +225,16 @@ class ConnectionManager: NSObject, ObservableObject, URLSessionWebSocketDelegate
         DispatchQueue.main.async {
             switch type {
             case "connected":
-                self.isConnected = true
+                // Only update if not already connected (prevents UI flashing)
+                if !self.isConnected {
+                    self.isConnected = true
+                    print("✅ Connected to desktop")
+                }
                 self.reconnectAttempts = 0 // Reset on successful connection
                 self.stopReconnectTimer()
                 self.startPingTimer()
                 self.requestShoppingList()
                 self.requestStoreList()
-                print("✅ Connected to desktop")
                 
             case "pong":
                 // Keep-alive response
@@ -227,15 +243,18 @@ class ConnectionManager: NSObject, ObservableObject, URLSessionWebSocketDelegate
             case "shopping_list", "shopping_list_update":
                 if let itemsData = json["data"] as? [[String: Any]] {
                     let newItems = itemsData.compactMap { ShoppingItem(from: $0) }
-                    self.shoppingListStore?.updateFromServer(newItems)
-                    print("📝 Received \(newItems.count) items from desktop")
+                    
+                    // Extract version and forceReplace flags from message
+                    let version = json["version"] as? String
+                    let forceReplace = json["forceReplace"] as? Bool ?? (type == "shopping_list_update")
+                    
+                    self.shoppingListStore?.updateFromServer(newItems, version: version, forceReplace: forceReplace)
+                    print("📝 Received \(newItems.count) items from desktop (version: \(version ?? "none"), force: \(forceReplace))")
                     
                     // Super Wow Phase 4: Sync to Widget via App Group
                     if let userDefaults = UserDefaults(suiteName: "group.com.foodie") {
                         if let encoded = try? JSONEncoder().encode(newItems) {
                             userDefaults.set(encoded, forKey: "widget_shopping_items")
-                            // Force reload of widgets
-                            // Note: WidgetCenter import would be needed but simplified here for now
                         }
                     }
                     

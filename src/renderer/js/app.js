@@ -4094,7 +4094,7 @@ document.addEventListener('click', async (e) => {
 });
 
 // ---------- shopping list ----------
-const SHOP = { start: '', end: '', groups: [] };
+const SHOP = { start: '', end: '', groups: [], storeFilter: 'all' };
 
 function normalizeShopTitle_(s) {
   const str = String(s || '').trim();
@@ -4225,9 +4225,42 @@ function setCuisineSelect_(value) {
   el.value = String(value || '').trim();
 }
 
+function populateShopStoreFilter_() {
+  const select = document.getElementById('shopStoreFilter');
+  if (!select) return;
+
+  const currentValue = SHOP.storeFilter || 'all';
+  const storeIds = new Set();
+
+  if (SHOP.groups && SHOP.groups.length) {
+    for (const g of SHOP.groups) {
+      if (g.StoreId) storeIds.add(g.StoreId);
+    }
+  }
+
+  let html = '<option value="all">All Stores</option>';
+  for (const sid of storeIds) {
+    const name = getStoreNameById(sid) || (sid === 'unassigned' ? 'Unassigned' : sid);
+    const sel = (sid === currentValue) ? ' selected' : '';
+    html += `<option value="${escapeAttr(sid)}"${sel}>${escapeHtml(name)}</option>`;
+  }
+
+  select.innerHTML = html;
+
+  if (currentValue !== 'all' && !storeIds.has(currentValue)) {
+    SHOP.storeFilter = 'all';
+    select.value = 'all';
+  } else {
+    select.value = currentValue;
+  }
+}
+
 function renderShop_(groups) {
   SHOP.groups = Array.isArray(groups) ? groups : [];
   const out = document.getElementById('shopOut');
+
+  // Populate store filter dropdown
+  populateShopStoreFilter_();
 
   // ========== PHASE 4.1: Enhanced Empty State for Shopping List ==========
   if (!SHOP.groups.length) {
@@ -4254,6 +4287,25 @@ function renderShop_(groups) {
     return;
   }
 
+  // Apply store filter
+  const filteredGroups = SHOP.storeFilter === 'all' 
+    ? SHOP.groups 
+    : SHOP.groups.filter(g => g.StoreId === SHOP.storeFilter);
+
+  if (filteredGroups.length === 0) {
+    out.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">🔍</div>
+            <div class="empty-state-title">No items for this store</div>
+            <div class="empty-state-message">
+              No ingredients are assigned to this store.<br>
+              Select "All Stores" to see all items.
+            </div>
+          </div>
+        `;
+    return;
+  }
+
   // Load bought status from localStorage
   let boughtItems = {};
   try {
@@ -4261,22 +4313,27 @@ function renderShop_(groups) {
     if (saved) boughtItems = JSON.parse(saved);
   } catch (_) { }
 
-  // Count total items
-  const totalItems = SHOP.groups.reduce((sum, g) => sum + g.Items.length, 0);
+  // Count total items (from filtered groups)
+  const totalItems = filteredGroups.reduce((sum, g) => sum + g.Items.length, 0);
   const boughtCount = Object.values(boughtItems).filter(Boolean).length;
+
+  // Build summary text
+  const filterText = SHOP.storeFilter === 'all' 
+    ? `${totalItems} item${totalItems !== 1 ? 's' : ''} across ${filteredGroups.length} store${filteredGroups.length !== 1 ? 's' : ''}`
+    : `${totalItems} item${totalItems !== 1 ? 's' : ''} at ${getStoreNameById(SHOP.storeFilter) || SHOP.storeFilter}`;
 
   // Add summary at the top
   out.innerHTML = `
         <div style="background:rgba(77,163,255,0.1); border:1px solid rgba(77,163,255,0.3); border-radius:10px; padding:12px; margin-bottom:12px;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <span style="font-weight:600;">📝 Shopping Summary</span>
-            <span>${totalItems} item${totalItems !== 1 ? 's' : ''} across ${SHOP.groups.length} store${SHOP.groups.length !== 1 ? 's' : ''}</span>
+            <span>${filterText}</span>
           </div>
           <div style="margin-top:6px; font-size:13px; color:var(--muted);">
             ✓ Purchased: ${boughtCount} / ${totalItems} items
           </div>
         </div>
-      ` + SHOP.groups.map(g => {
+      ` + filteredGroups.map(g => {
     const storeName = getStoreNameById(g.StoreId) || (g.StoreId === 'unassigned' ? 'Unassigned' : g.StoreId);
     const isUnassigned = (g.StoreId === 'unassigned');
 
@@ -4358,7 +4415,7 @@ function renderShop_(groups) {
                       </div>
                       <div class="shop-item-actions-wrapper">
                         <div class="shop-item-store-select" style="min-width: 160px;">
-                          <select data-action="shop-item-store" data-ingredient="${escapeAttr(it.IngredientNorm)}" data-unit="${escapeAttr(it.Unit || '')}" data-storeid="${escapeAttr(storeIdForItem)}" style="padding: 4px 8px; height: 30px; font-size: 13px;">
+                          <select data-action="shop-item-store" data-ingredient="${escapeAttr(it.IngredientNorm)}" data-unit="${escapeAttr(it.Unit || '')}" data-storeid="${escapeAttr(storeIdForItem)}" data-sourceids="${escapeAttr(sourceIdsJson)}" style="padding: 4px 8px; height: 30px; font-size: 13px;">
                             ${storeOptionsHtml_(storeIdForItem)}
                           </select>
                         </div>
@@ -5140,12 +5197,19 @@ document.addEventListener('change', async (e) => {
   const ingredientNorm = String(sel.dataset.ingredient || '').trim();
   const unit = String(sel.dataset.unit || '').trim();
   const storeId = String(sel.value || '').trim();
+  const sourceIdsJson = sel.dataset.sourceids || '[]';
+  let sourceIds = [];
+  try {
+    sourceIds = JSON.parse(sourceIdsJson);
+  } catch (_) { }
+  
   if (!SHOP.start || !SHOP.end) {
     showToast('Please generate the shopping list first', 'warning');
     return;
   }
-  const res = await api('assignShoppingItemStore', { start: SHOP.start, end: SHOP.end, ingredientNorm, unit, storeId });
+  const res = await api('assignShoppingItemStore', { start: SHOP.start, end: SHOP.end, ingredientNorm, unit, storeId, sourceIds });
   if (!res.ok) { showToast(res.error || 'Failed to assign store', 'error'); return; }
+  showToast(`Store updated for ${ingredientNorm}`, 'success', 2000);
   // Refresh grouping immediately
   await buildShop();
 });
@@ -8655,6 +8719,7 @@ function bindUi() {
   safeBind('btnBuildShop', 'click', buildShop);
   safeBind('btnClearShop', 'click', clearShopUi);
   safeBind('btnPrintShopAll', 'click', printShoppingList);
+  safeBind('btnSendToPhone', 'click', sendShoppingListToPhones);
 
   // Print shopping list function
   function printShoppingList() {
@@ -8818,14 +8883,27 @@ function bindUi() {
   });
 
   // Collection inclusion toggle
-  document.getElementById('shopIncludeCollections').addEventListener('change', (e) => {
+  document.getElementById('shopIncludeCollections').addEventListener('change', async (e) => {
     const options = document.getElementById('collectionInclusionOptions');
     options.style.display = e.target.checked ? 'block' : 'none';
 
     // Populate collections dropdown when first shown
     if (e.target.checked) {
+      // Load collections if not already loaded
+      if (!COLLECTIONS || COLLECTIONS.length === 0) {
+        const res = await api('listCollections', {});
+        if (res.ok) {
+          COLLECTIONS = res.collections || [];
+        }
+      }
       populateShoppingCollectionsDropdown();
     }
+  });
+
+  // Store filter dropdown for shopping list
+  document.getElementById('shopStoreFilter').addEventListener('change', (e) => {
+    SHOP.storeFilter = e.target.value;
+    renderShop_(SHOP.groups);
   });
 
   // Pantry
@@ -12005,7 +12083,8 @@ async function sendShoppingListToPhones() {
     const items = [];
     if (SHOP.groups && SHOP.groups.length > 0) {
       for (const group of SHOP.groups) {
-        const storeName = group.Store || '';
+        // Fix: resolve store name from StoreId using getStoreNameById
+        const storeName = getStoreNameById(group.StoreId) || group.StoreId || 'Unassigned';
         for (const item of (group.Items || [])) {
           items.push({
             id: `${storeName}-${item.IngredientNorm || item.DisplayTitle}`,

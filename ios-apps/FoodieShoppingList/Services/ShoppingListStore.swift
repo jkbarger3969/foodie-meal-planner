@@ -14,10 +14,14 @@ class ShoppingListStore: ObservableObject {
     private let storageKey = "savedShoppingList"
     private let pendingSyncKey = "pendingSync"
     private let lastSyncKey = "lastSyncDate"
+    private let listVersionKey = "listVersion"
+    
+    @Published var listVersion: String = "" // Tracks which version of the list we have
     
     init() {
         loadFromLocalStorage()
         loadPendingSync()
+        listVersion = UserDefaults.standard.string(forKey: listVersionKey) ?? ""
     }
     
     // MARK: - Local Storage
@@ -57,16 +61,53 @@ class ShoppingListStore: ObservableObject {
     
     // MARK: - Server Updates
     
-    func updateFromServer(_ newItems: [ShoppingItem]) {
-        // If server sends empty list, only clear if we don't have manual items
-        if newItems.isEmpty {
-            // Keep only manually added items
-            items = items.filter { $0.isManuallyAdded }
+    /// Update from server with version tracking
+    /// - Parameters:
+    ///   - newItems: Items received from server
+    ///   - version: Version identifier from server (timestamp or unique ID)
+    ///   - forceReplace: If true, completely replace local list (used when user explicitly requests fresh list)
+    func updateFromServer(_ newItems: [ShoppingItem], version: String? = nil, forceReplace: Bool = false) {
+        // CRITICAL: Never clear existing items just because server sends empty list
+        // The list should persist until user explicitly clears it or marks items as purchased
+        
+        // If server sends empty list and we have items, keep our items (offline resilience)
+        if newItems.isEmpty && !items.isEmpty && !forceReplace {
+            print("📱 Server sent empty list but we have \(items.count) local items - keeping local data")
+            return
+        }
+        
+        // If forceReplace is set (user explicitly requested new list), replace everything
+        if forceReplace {
+            print("📱 Force replacing list with \(newItems.count) items (version: \(version ?? "none"))")
+            items = newItems
+            if let v = version {
+                listVersion = v
+                UserDefaults.standard.set(v, forKey: listVersionKey)
+            }
+            pendingSync.removeAll()
             saveToLocalStorage()
             return
         }
         
-        // Merge with existing items, preserving local changes
+        // If we have a version and it matches, this is the same list - just merge changes
+        if let v = version, !v.isEmpty, v == listVersion {
+            print("📱 Same list version (\(v)) - merging \(newItems.count) items")
+            mergeServerItems(newItems)
+            return
+        }
+        
+        // New version or no version tracking - smart merge
+        if let v = version, !v.isEmpty {
+            print("📱 New list version: \(v) (was: \(listVersion)) - updating with \(newItems.count) items")
+            listVersion = v
+            UserDefaults.standard.set(v, forKey: listVersionKey)
+        }
+        
+        mergeServerItems(newItems)
+    }
+    
+    /// Merge server items with local items, preserving local purchase state
+    private func mergeServerItems(_ newItems: [ShoppingItem]) {
         var updatedItems: [ShoppingItem] = []
         var processedIds = Set<String>()
         
@@ -87,8 +128,17 @@ class ShoppingListStore: ObservableObject {
         let manualItems = items.filter { $0.isManuallyAdded && !processedIds.contains($0.id) }
         updatedItems.append(contentsOf: manualItems)
         
+        // Keep purchased items that aren't in server list (they were purchased, don't lose them)
+        let purchasedNotInServer = items.filter { $0.isPurchased && !processedIds.contains($0.id) && !$0.isManuallyAdded }
+        updatedItems.append(contentsOf: purchasedNotInServer)
+        
         items = updatedItems
         saveToLocalStorage()
+    }
+    
+    /// Legacy method for backward compatibility - calls new method with defaults
+    func updateFromServerLegacy(_ newItems: [ShoppingItem]) {
+        updateFromServer(newItems, version: nil, forceReplace: false)
     }
     
     // MARK: - Item Management

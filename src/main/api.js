@@ -449,6 +449,52 @@ function convertQty_(qty, fromUnit, toUnit) {
   return { ok: true, qty: out.qty };
 }
 
+function formatQty_(qty, unit) {
+  if (qty === null || qty === undefined || !Number.isFinite(Number(qty))) {
+    return unit ? unit : '';
+  }
+  const n = Number(qty);
+  const u = String(unit || '').trim();
+
+  const commonFractions = [
+    { decimal: 0.125, text: '1/8' },
+    { decimal: 0.25, text: '1/4' },
+    { decimal: 0.333, text: '1/3' },
+    { decimal: 0.375, text: '3/8' },
+    { decimal: 0.5, text: '1/2' },
+    { decimal: 0.625, text: '5/8' },
+    { decimal: 0.667, text: '2/3' },
+    { decimal: 0.75, text: '3/4' },
+    { decimal: 0.875, text: '7/8' }
+  ];
+
+  const whole = Math.floor(n);
+  const frac = n - whole;
+
+  if (frac < 0.01) {
+    return u ? `${whole} ${u}` : `${whole}`;
+  }
+
+  let fracText = '';
+  for (const f of commonFractions) {
+    if (Math.abs(frac - f.decimal) < 0.05) {
+      fracText = f.text;
+      break;
+    }
+  }
+
+  if (fracText) {
+    if (whole > 0) {
+      return u ? `${whole} ${fracText} ${u}` : `${whole} ${fracText}`;
+    } else {
+      return u ? `${fracText} ${u}` : fracText;
+    }
+  }
+
+  const rounded = Math.round(n * 100) / 100;
+  return u ? `${rounded} ${u}` : `${rounded}`;
+}
+
 function pantryQtyFromRow_(row) {
   if (!row) return { qtyNum: null, unit: '' };
   let qtyNum = (row.QtyNum === null || row.QtyNum === undefined || row.QtyNum === '') ? null : Number(row.QtyNum);
@@ -2432,16 +2478,40 @@ function buildShoppingList(payload) {
       // Merge logic
       const curQty = (cur.QtyNum !== null && Number.isFinite(cur.QtyNum)) ? Number(cur.QtyNum) : null;
       const newQty = (r.QtyNum !== null && r.QtyNum !== undefined) ? Number(r.QtyNum) : null;
+      const curUnit = canonicalUnit(cur.Unit);
+      const newUnit = canonicalUnit(r.Unit);
 
-      // Only add qty if units match.
-      // TODO: Future improvement - convert units here using db.js/convertQty_
-      if (curQty !== null && newQty !== null && cur.Unit === r.Unit) {
-        cur.QtyNum = curQty + newQty;
-        cur.QtyText = `${Number(cur.QtyNum.toFixed(2))} ${cur.Unit}`;
-      } else {
-        // Mismatched units - append text
-        // "1 cup" + "2 tbsp" -> "1 cup + 2 tbsp"
-        cur.QtyText = `${cur.QtyText} + ${r.QtyText || (newQty + ' ' + r.Unit)}`;
+      // Try to combine quantities with unit conversion
+      if (curQty !== null && newQty !== null && curUnit && newUnit) {
+        if (curUnit === newUnit) {
+          // Same units - direct addition
+          cur.QtyNum = curQty + newQty;
+          cur.QtyText = formatQty_(cur.QtyNum, cur.Unit);
+        } else {
+          // Try unit conversion
+          const converted = convertQty_(newQty, newUnit, curUnit);
+          if (converted.ok && converted.qty !== null) {
+            // Successful conversion - add in cur's unit
+            cur.QtyNum = curQty + converted.qty;
+            cur.QtyText = formatQty_(cur.QtyNum, cur.Unit);
+          } else {
+            // Incompatible units - append text
+            const newQtyText = r.QtyText || formatQty_(newQty, r.Unit);
+            cur.QtyText = `${cur.QtyText} + ${newQtyText}`;
+            cur.QtyNum = null; // Can't sum numeric values with incompatible units
+          }
+        }
+      } else if (curQty === null && newQty !== null) {
+        // Current has no qty, use new
+        cur.QtyNum = newQty;
+        cur.Unit = r.Unit || cur.Unit;
+        cur.QtyText = formatQty_(newQty, cur.Unit);
+      } else if (cur.QtyText && (r.QtyText || newQty !== null)) {
+        // Fall back to text concatenation
+        const newQtyText = r.QtyText || (newQty !== null ? formatQty_(newQty, r.Unit) : '');
+        if (newQtyText) {
+          cur.QtyText = `${cur.QtyText} + ${newQtyText}`;
+        }
       }
 
       cur.OriginalNames.push(r.IngredientNorm);
@@ -2562,10 +2632,28 @@ function buildShoppingList(payload) {
 function assignShoppingItemStore(payload) {
   const ingredientNorm = normLower_((payload && payload.ingredientNorm) || '');
   const storeId = String(payload && payload.storeId || '').trim();
-  if (!ingredientNorm) return err_('ingredientNorm required.');
+  const sourceIds = Array.isArray(payload && payload.sourceIds) ? payload.sourceIds : [];
+  
+  if (!ingredientNorm && sourceIds.length === 0) return err_('ingredientNorm or sourceIds required.');
 
-  db().prepare("UPDATE ingredients SET StoreId=? WHERE lower(IngredientNorm)=?").run(storeId, ingredientNorm);
-  return ok_({});
+  let updatedCount = 0;
+
+  // If we have sourceIds, use them to update specific recipe ingredients
+  if (sourceIds.length > 0) {
+    const stmt = db().prepare("UPDATE ingredients SET StoreId=? WHERE RecipeId=? AND idx=?");
+    for (const src of sourceIds) {
+      if (src.rid && src.idx !== undefined) {
+        stmt.run(storeId, src.rid, src.idx);
+        updatedCount++;
+      }
+    }
+  } else {
+    // Fallback: update by ingredient name (legacy behavior)
+    const result = db().prepare("UPDATE ingredients SET StoreId=? WHERE lower(IngredientNorm)=?").run(storeId, ingredientNorm);
+    updatedCount = result.changes;
+  }
+
+  return ok_({ updated: updatedCount });
 }
 
 // Add item back to pantry (when removed from shopping list or not purchased)

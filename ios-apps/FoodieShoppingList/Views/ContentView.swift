@@ -308,25 +308,17 @@ struct ContentView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
             
-            if connection.isConnected {
+            VStack(spacing: 8) {
                 Text("Send a list from your desktop app")
                     .font(.callout)
                     .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-            } else {
-                VStack(spacing: 12) {
-                    Text("Not connected to desktop")
-                        .font(.callout)
-                        .foregroundColor(.secondary)
-                    
-                    Button("Connect Now") {
-                        connection.connect()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                }
+                
+                Text("or add items manually with the + button")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal)
             
             Spacer()
         }
