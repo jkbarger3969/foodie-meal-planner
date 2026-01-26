@@ -862,7 +862,9 @@ async function handleApiCall({ fn, payload, store }) {
       case 'googleCalendarSyncRange': return googleCalendarSyncRange(payload, store);
       case 'initGoogleCalendar': return initGoogleCalendar(payload);
       case 'getGoogleAuthUrl': return getGoogleAuthUrl();
+      case 'google-login': return getGoogleAuthUrl(); // Alias for frontend compatibility
       case 'setGoogleAuthCode': return setGoogleAuthCode(payload);
+      case 'google-submit-code': return googleCal.getTokenFromCode(payload); // Direct code submission
       case 'listGoogleCalendars': return listGoogleCalendars();
       case 'getGoogleCalendarStatus': return getGoogleCalendarStatus();
       case 'revokeGoogleCalendar': return revokeGoogleCalendar();
@@ -3309,9 +3311,10 @@ async function getGoogleAuthUrl() {
     const authUrl = googleCal.getAuthUrl();
     if (!authUrl) return err_('Failed to generate auth URL');
 
-    // 2. Open it in default browser (this part would typically be handled by ipcMain.handle in Electron)
-    // For a pure backend function, we just return the URL.
-    // The client-side would then open this URL.
+    // 2. Open it in default browser
+    const { shell } = require('electron');
+    await shell.openExternal(authUrl);
+
     return ok_({ url: authUrl });
   } catch (error) {
     return err_(error.message || 'Failed to get auth URL');

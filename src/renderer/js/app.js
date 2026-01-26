@@ -3277,7 +3277,7 @@ async function pickLeftoversSourceAsync_(targetDate, targetSlot) {
       const slotMeals = day[slot];
       // Handle both array (multi-user) and single object (legacy) formats
       const mealsArray = Array.isArray(slotMeals) ? slotMeals : (slotMeals ? [slotMeals] : []);
-      
+
       for (const m of mealsArray) {
         if (!m || !m.RecipeId || !m.Title) continue;
         // Only show meals that are NOT already marked as leftovers
@@ -4288,8 +4288,8 @@ function renderShop_(groups) {
   }
 
   // Apply store filter
-  const filteredGroups = SHOP.storeFilter === 'all' 
-    ? SHOP.groups 
+  const filteredGroups = SHOP.storeFilter === 'all'
+    ? SHOP.groups
     : SHOP.groups.filter(g => g.StoreId === SHOP.storeFilter);
 
   if (filteredGroups.length === 0) {
@@ -4318,7 +4318,7 @@ function renderShop_(groups) {
   const boughtCount = Object.values(boughtItems).filter(Boolean).length;
 
   // Build summary text
-  const filterText = SHOP.storeFilter === 'all' 
+  const filterText = SHOP.storeFilter === 'all'
     ? `${totalItems} item${totalItems !== 1 ? 's' : ''} across ${filteredGroups.length} store${filteredGroups.length !== 1 ? 's' : ''}`
     : `${totalItems} item${totalItems !== 1 ? 's' : ''} at ${getStoreNameById(SHOP.storeFilter) || SHOP.storeFilter}`;
 
@@ -5202,7 +5202,7 @@ document.addEventListener('change', async (e) => {
   try {
     sourceIds = JSON.parse(sourceIdsJson);
   } catch (_) { }
-  
+
   if (!SHOP.start || !SHOP.end) {
     showToast('Please generate the shopping list first', 'warning');
     return;
@@ -6515,7 +6515,7 @@ function openLeftoverPicker() {
         const slotMeals = plan[slot];
         // Handle both array (multi-user) and single object (legacy) formats
         const mealsArray = Array.isArray(slotMeals) ? slotMeals : (slotMeals ? [slotMeals] : []);
-        
+
         for (const m of mealsArray) {
           if (m && m.Title && m.RecipeId) {
             meals.push({
@@ -9030,6 +9030,56 @@ function bindUi() {
       return;
     }
   });
+
+  // ========== GOOGLE CALENDAR SETUP ==========
+  function initGoogleCalendarUI() {
+    const btnAuthorize = document.getElementById('btnGoogleAuthorize');
+    const btnSubmitCode = document.getElementById('btnGoogleAuthSubmit');
+    const inputCode = document.getElementById('googleAuthCode');
+    const setupSection = document.getElementById('googleCalSetup');
+
+    // PKCE Flow: Step 1 - Open Auth URL
+    if (btnAuthorize) {
+      btnAuthorize.disabled = false; // Always enabled now (no credentials file needed)
+      btnAuthorize.onclick = async () => {
+        const res = await api('google-login');
+        if (res.ok) {
+          document.getElementById('googleAuthCodeRow').style.display = 'flex';
+          inputCode.focus();
+          showToast('Browser opened. Please paste the code below.', 'info');
+        } else {
+          showToast(res.error, 'error');
+        }
+      };
+    }
+
+    // PKCE Flow: Step 2 - Submit Code
+    if (btnSubmitCode) {
+      btnSubmitCode.onclick = async () => {
+        const code = inputCode.value.trim();
+        if (!code) return;
+
+        btnSubmitCode.disabled = true;
+        btnSubmitCode.textContent = 'Verifying...';
+
+        const res = await api('google-submit-code', code);
+        if (res.ok) {
+          showToast('Google Calendar Connected!', 'success');
+          setupSection.style.display = 'none';
+          checkGoogleCalStatus(); // Refresh status
+        } else {
+          showToast(res.error, 'error');
+          btnSubmitCode.disabled = false;
+          btnSubmitCode.textContent = 'Complete Authorization';
+        }
+      };
+    }
+
+    // Hide the old file upload section if it exists
+    const fileUploadRow = document.getElementById('googleCredentialsFile')?.closest('.row');
+    if (fileUploadRow) fileUploadRow.style.display = 'none';
+  }
+  initGoogleCalendarUI(); // Call the function to set up the UI
 
   // Stores
   const btnReloadStores = document.getElementById('btnReloadStores');
@@ -12100,7 +12150,7 @@ async function sendShoppingListToPhones() {
         }
       }
     }
-    
+
     console.log(`🔵 RENDERER: Sending ${items.length} items from current shopping list`);
     console.log('🔵 RENDERER: Calling Foodie.sendShoppingListToPhones()...');
     const result = await Foodie.sendShoppingListToPhones(items);
@@ -12175,6 +12225,17 @@ async function getLocalIP() {
 if (typeof Foodie !== 'undefined' && Foodie.onCompanionDevicesChanged) {
   Foodie.onCompanionDevicesChanged((devices) => {
     updateCompanionDevices();
+  });
+}
+
+// Listen for pantry updates from iPhone barcode scanner
+if (typeof Foodie !== 'undefined' && Foodie.onPantryUpdated) {
+  Foodie.onPantryUpdated((data) => {
+    console.log('📦 Pantry updated from companion device:', data);
+    loadPantry();
+    if (data && data.item) {
+      showToast(`Added to pantry: ${data.item}`, 'success', 3000);
+    }
   });
 }
 

@@ -17,121 +17,149 @@ const REDIRECT_URI = 'http://localhost:12500'; // Loopback IP for desktop auth
 
 let oauth2Client = null;
 let calendar = null;
+let currentCodeVerifier = null; // Stored temporarily during login flow
 
+// Path for storing the session token (NOT keys)
 function getTokenPath() {
   const tokenPath = path.join(app.getPath('userData'), 'google-token.json');
-  console.log('[google-calendar] Token path:', tokenPath);
   return tokenPath;
 }
 
 /**
- * Initialize Google Calendar API with stored credentials
+ * Generate PKCE Code Verifier
  */
-async function initializeGoogleCalendar(credentials) {
+function base64URLEncode(str) {
+  return str.toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
+function sha256(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest();
+}
+
+/**
+ * Initialize Google Calendar API
+ * Now simpler: Just needs the token, no "credentials file".
+ */
+function initializeGoogleCalendar() {
   try {
-    console.log('[google-calendar] Initializing Google Calendar API...');
+    if (oauth2Client) return { ok: true };
 
-    // Create OAuth2 client
-    const { client_id, client_secret } = credentials.installed || credentials.web;
-
-    // Get redirect URI from credentials or default to OOB
-    const redirect_uri = (credentials.installed && credentials.installed.redirect_uris && credentials.installed.redirect_uris[0]) ||
-      (credentials.web && credentials.web.redirect_uris && credentials.web.redirect_uris[0]) ||
-      'urn:ietf:wg:oauth:2.0:oob';
+    console.log('[google-calendar] Initializing PKCE Client...');
 
     oauth2Client = new google.auth.OAuth2(
-      client_id,
-      client_secret,
-      redirect_uri
+      CLIENT_ID,
+      null, // No Client Secret for PKCE
+      REDIRECT_URI
     );
-    console.log('[google-calendar] OAuth2 client created');
 
-    // Load previously saved token if it exists
+    // Load existing token
     const tokenPath = getTokenPath();
     if (fs.existsSync(tokenPath)) {
-      console.log('[google-calendar] Loading existing token from:', tokenPath);
-      const token = JSON.parse(fs.readFileSync(tokenPath, 'utf8'));
-      oauth2Client.setCredentials(token);
-      console.log('[google-calendar] Token loaded successfully');
+      console.log('[google-calendar] Loading existing token...');
+      try {
+        const token = JSON.parse(fs.readFileSync(tokenPath, 'utf8'));
+        oauth2Client.setCredentials(token);
+      } catch (e) {
+        console.error('[google-calendar] Failed to parse token:', e);
+      }
     } else {
-      console.log('[google-calendar] No token found at:', tokenPath);
+      console.log('[google-calendar] No existing token found.');
     }
 
-    // Initialize calendar API
     calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-    console.log('[google-calendar] Calendar API initialized');
-
     return { ok: true };
   } catch (error) {
-    console.error('[google-calendar] Initialization error:', error);
+    console.error('[google-calendar] Init error:', error);
     return { ok: false, error: error.message };
   }
 }
 
 /**
- * Get OAuth2 authorization URL for user to grant permissions
+ * Step 1: Get Auth URL with PKCE Challenge
  */
 function getAuthUrl() {
-  if (!oauth2Client) {
-    return null;
-  }
+  // Ensure initialized
+  initializeGoogleCalendar();
+
+  // 1. Generate Verifier
+  const verifier = base64URLEncode(crypto.randomBytes(32));
+  currentCodeVerifier = verifier;
+
+  // 2. Generate Challenge
+  const challenge = base64URLEncode(sha256(verifier));
 
   const SCOPES = ['https://www.googleapis.com/auth/calendar'];
 
+  // 3. Create URL
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: SCOPES,
-    prompt: 'consent' // Force consent screen to get refresh token
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    prompt: 'consent'
   });
 }
 
 /**
- * Exchange authorization code for tokens
+ * Step 2: Exchange Code + Verifier for Token
  */
 async function getTokenFromCode(code) {
   try {
-    const { tokens } = await oauth2Client.getToken(code);
-    oauth2Client.setCredentials(tokens);
+    if (!currentCodeVerifier) {
+      // Try to recover if verifier is lost (e.g. app restart during flow)
+      // For now, fail safely
+      console.warn('[google-calendar] No PKCE verifier found. Flow restarted?');
+      // In a strict PKCE flow we should fail. But user might have pasted code manually after restart.
+      // We can't proceed without verifier because Google will reject it.
+      // However, if the code is from a non-PKCE flow (legacy), it might work? No, we used code_challenge in URL.
+      // We will proceed and let Google reject it if invalid.
+    }
 
-    // Save token for future use
+    // Ensure client exists
+    initializeGoogleCalendar();
+
+    // Exchange using the verifier we generated earlier
+    // Note: If currentCodeVerifier is null, this might fail unless googleapis handles it.
+    const { tokens } = await oauth2Client.getToken({
+      code,
+      codeVerifier: currentCodeVerifier
+    });
+
+    oauth2Client.setCredentials(tokens);
+    currentCodeVerifier = null; // Clear sensitive verifier
+
+    // Save token
     const tokenPath = getTokenPath();
     fs.writeFileSync(tokenPath, JSON.stringify(tokens, null, 2));
 
     return { ok: true, tokens };
   } catch (error) {
+    console.error('Token Exchange Error:', error);
     return { ok: false, error: error.message };
   }
 }
 
-/**
- * Check if we have valid credentials and token
- */
 function isAuthenticated() {
   if (!oauth2Client) return false;
-
   const credentials = oauth2Client.credentials;
   if (!credentials || !credentials.access_token) return false;
 
-  // Check if token is expired
-  if (credentials.expiry_date && credentials.expiry_date <= Date.now()) {
-    // Token expired, but we might have refresh token
-    return credentials.refresh_token ? true : false;
+  // Check expiration
+  if (credentials.expiry_date && credentials.expiry_date <= Date.now() + 60000) {
+    // If expired but has refresh token, we consider it "authenticated" 
+    // because the library will auto-refresh on request
+    return !!credentials.refresh_token;
   }
-
   return true;
 }
 
-/**
- * List user's calendars
- */
 async function listCalendars() {
   try {
-    if (!isAuthenticated()) {
-      return { ok: false, error: 'Not authenticated' };
-    }
-
+    if (!isAuthenticated()) return { ok: false, error: 'Not authenticated' };
     const res = await calendar.calendarList.list();
-
     return {
       ok: true,
       calendars: res.data.items.map(cal => ({
@@ -146,103 +174,67 @@ async function listCalendars() {
   }
 }
 
-/**
- * Check for duplicate events in the calendar
- */
 async function findDuplicateEvents({ calendarId, title, startDateTime, endDateTime }) {
   try {
-    if (!isAuthenticated()) {
-      return { ok: false, error: 'Not authenticated' };
-    }
-
-    // Search for events with same title in the time range
+    if (!isAuthenticated()) return { ok: false, error: 'Not authenticated' };
     const response = await calendar.events.list({
       calendarId,
       timeMin: startDateTime,
       timeMax: endDateTime,
-      q: title, // Search query
+      q: title,
       singleEvents: true,
     });
-
-    const matchingEvents = response.data.items || [];
-    return { ok: true, events: matchingEvents };
+    return { ok: true, events: response.data.items || [] };
   } catch (error) {
     return { ok: false, error: error.message };
   }
 }
 
-/**
- * Create or update a calendar event
- */
-async function upsertGoogleEvent({ calendarId, eventId, title, description, startDateTime, endDateTime }) {
+async function upsertGoogleEvent(params) {
   try {
-    if (!isAuthenticated()) {
-      return { ok: false, error: 'Not authenticated' };
-    }
+    if (!isAuthenticated()) return { ok: false, error: 'Not authenticated' };
 
     const event = {
-      summary: title,
-      description: description || '',
-      start: {
-        dateTime: startDateTime,
-        timeZone: 'America/New_York',
-      },
-      end: {
-        dateTime: endDateTime,
-        timeZone: 'America/New_York',
-      },
+      summary: params.title,
+      description: params.description || '',
+      start: { dateTime: params.startDateTime, timeZone: 'America/New_York' },
+      end: { dateTime: params.endDateTime, timeZone: 'America/New_York' }
     };
 
-    let result;
-
-    if (eventId) {
-      // Update existing event
+    if (params.eventId) {
       try {
-        result = await calendar.events.update({
-          calendarId,
-          eventId,
-          requestBody: event,
+        const result = await calendar.events.update({
+          calendarId: params.calendarId,
+          eventId: params.eventId,
+          requestBody: event
         });
         return { ok: true, eventId: result.data.id, action: 'updated' };
-      } catch (updateError) {
-        // Event might not exist, create new one
-        if (updateError.code === 404) {
-          console.log(`[upsertGoogleEvent] Event ${eventId} not found (404), creating new event`);
-          result = await calendar.events.insert({
-            calendarId,
-            requestBody: event,
-          });
+      } catch (err) {
+        if (err.code === 404) {
+          const result = await calendar.events.insert({ calendarId: params.calendarId, requestBody: event });
           return { ok: true, eventId: result.data.id, action: 'created' };
         }
-        throw updateError;
+        throw err;
       }
     } else {
-      // Before creating, check for duplicates
+      // Check dupes
       const dupCheck = await findDuplicateEvents({
-        calendarId,
-        title,
-        startDateTime,
-        endDateTime
+        calendarId: params.calendarId,
+        title: params.title,
+        startDateTime: params.startDateTime,
+        endDateTime: params.endDateTime
       });
 
-      if (dupCheck.ok && dupCheck.events.length > 0) {
-        console.log(`[upsertGoogleEvent] Found ${dupCheck.events.length} existing event(s) matching "${title}" at ${startDateTime}`);
-        // Use the first matching event instead of creating duplicate
-        const existingEvent = dupCheck.events[0];
-        console.log(`[upsertGoogleEvent] Updating existing event ${existingEvent.id} instead of creating duplicate`);
-        result = await calendar.events.update({
-          calendarId,
-          eventId: existingEvent.id,
-          requestBody: event,
+      if (dupCheck.ok && dupCheck.events && dupCheck.events.length > 0) {
+        const result = await calendar.events.update({
+          calendarId: params.calendarId,
+          eventId: dupCheck.events[0].id,
+          requestBody: event
         });
         return { ok: true, eventId: result.data.id, action: 'updated' };
       }
 
-      // Create new event
-      result = await calendar.events.insert({
-        calendarId,
-        requestBody: event,
-      });
+      const result = await calendar.events.insert({ calendarId: params.calendarId, requestBody: event });
       return { ok: true, eventId: result.data.id, action: 'created' };
     }
   } catch (error) {
@@ -250,100 +242,33 @@ async function upsertGoogleEvent({ calendarId, eventId, title, description, star
   }
 }
 
-/**
- * Delete a calendar event
- */
 async function deleteGoogleEvent({ calendarId, eventId }) {
+  if (!isAuthenticated()) return { ok: false, error: 'Not authenticated' };
+  if (!eventId) return { ok: true };
   try {
-    if (!isAuthenticated()) {
-      return { ok: false, error: 'Not authenticated' };
-    }
-
-    if (!eventId) {
-      return { ok: true }; // Nothing to delete
-    }
-
-    await calendar.events.delete({
-      calendarId,
-      eventId,
-    });
-
+    await calendar.events.delete({ calendarId, eventId });
     return { ok: true };
-  } catch (error) {
-    // 404 means event already deleted, that's ok
-    if (error.code === 404) {
-      return { ok: true };
-    }
-    return { ok: false, error: error.message };
+  } catch (e) {
+    return e.code === 404 ? { ok: true } : { ok: false, error: e.message };
   }
 }
 
-/**
- * Save Google credentials (from setup)
- */
-function saveCredentials(credentials) {
-  try {
-    const credentialsPath = getCredentialsPath();
-    fs.writeFileSync(credentialsPath, JSON.stringify(credentials, null, 2));
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, error: error.message };
-  }
-}
-
-/**
- * Load saved credentials
- */
-function loadCredentials() {
-  try {
-    // Check environment variables first
-    if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
-      console.log('[google-calendar] Using credentials from environment variables');
-      const credentials = {
-        installed: {
-          client_id: process.env.GOOGLE_CLIENT_ID,
-          client_secret: process.env.GOOGLE_CLIENT_SECRET,
-          redirect_uris: [process.env.GOOGLE_REDIRECT_URI || 'urn:ietf:wg:oauth:2.0:oob']
-        }
-      };
-      return { ok: true, credentials };
-    }
-
-    const credentialsPath = getCredentialsPath();
-    if (fs.existsSync(credentialsPath)) {
-      console.log('[google-calendar] Loading credentials from file:', credentialsPath);
-      const credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
-      return { ok: true, credentials };
-    }
-    return { ok: false, error: 'No credentials found. Please set GOOGLE_CLIENT_ID/SECRET in .env or upload credentials.json.' };
-  } catch (error) {
-    return { ok: false, error: error.message };
-  }
-}
-
-/**
- * Revoke access and delete tokens
- */
 async function revokeAccess() {
   try {
-    if (oauth2Client && oauth2Client.credentials.access_token) {
-      await oauth2Client.revokeCredentials();
-    }
-
-    // Delete token file
+    if (oauth2Client) await oauth2Client.revokeCredentials();
     const tokenPath = getTokenPath();
-    if (fs.existsSync(tokenPath)) {
-      fs.unlinkSync(tokenPath);
-    }
-
+    if (fs.existsSync(tokenPath)) fs.unlinkSync(tokenPath);
     oauth2Client = null;
     calendar = null;
-
     return { ok: true };
-  } catch (error) {
-    return { ok: false, error: error.message };
+  } catch (e) {
+    return { ok: false, error: e.message };
   }
 }
+
+// Deprecated functions (safe no-ops)
+function saveCredentials() { return { ok: true }; }
+function loadCredentials() { return { ok: true }; }
 
 module.exports = {
   initializeGoogleCalendar,
@@ -354,7 +279,7 @@ module.exports = {
   upsertGoogleEvent,
   deleteGoogleEvent,
   findDuplicateEvents,
+  revokeAccess,
   saveCredentials,
-  loadCredentials,
-  revokeAccess
+  loadCredentials
 };
