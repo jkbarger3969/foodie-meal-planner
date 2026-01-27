@@ -54,24 +54,24 @@ function cleanupListeners(elementOrId) {
 // Common cooking fractions: 1/8, 1/4, 1/3, 1/2, 2/3, 3/4
 function decimalToFraction(decimal) {
   if (decimal === null || decimal === undefined || decimal === '') return '';
-  
+
   const num = parseFloat(decimal);
   if (isNaN(num)) return String(decimal);
   if (num === 0) return '0';
-  
+
   // Handle negative numbers
   const sign = num < 0 ? '-' : '';
   const absNum = Math.abs(num);
-  
+
   // Extract whole number and fractional part
   const whole = Math.floor(absNum);
   const frac = absNum - whole;
-  
+
   // If very close to whole number, return whole
   if (frac < 0.03) {
     return sign + (whole === 0 ? '0' : String(whole));
   }
-  
+
   // Common cooking fractions with their decimal equivalents and tolerance
   const fractions = [
     { decimal: 0.125, display: '⅛', tolerance: 0.02 },
@@ -86,7 +86,7 @@ function decimalToFraction(decimal) {
     { decimal: 0.833, display: '⅚', tolerance: 0.02 },
     { decimal: 0.875, display: '⅞', tolerance: 0.02 },
   ];
-  
+
   // Find closest matching fraction
   for (const f of fractions) {
     if (Math.abs(frac - f.decimal) <= f.tolerance) {
@@ -96,12 +96,12 @@ function decimalToFraction(decimal) {
       return sign + whole + ' ' + f.display;
     }
   }
-  
+
   // If close to next whole number (e.g., 0.97 -> 1)
   if (frac > 0.97) {
     return sign + String(whole + 1);
   }
-  
+
   // No matching fraction - return decimal rounded to 2 places
   const rounded = Math.round(absNum * 100) / 100;
   return sign + String(rounded);
@@ -110,7 +110,7 @@ function decimalToFraction(decimal) {
 // Format a quantity for display (converts decimals to fractions when appropriate)
 function formatQuantityForDisplay(qtyNum, unit) {
   if (qtyNum === '' || qtyNum === null || qtyNum === undefined) return '';
-  
+
   const fractionStr = decimalToFraction(qtyNum);
   if (unit) {
     return `${fractionStr} ${unit}`.trim();
@@ -888,7 +888,7 @@ function setupVirtualScrollListener_() {
   }
 
   // Create named handler for proper cleanup
-  _virtualScrollHandler = function() {
+  _virtualScrollHandler = function () {
     if (_virtualScrollTimeout) clearTimeout(_virtualScrollTimeout);
 
     _virtualScrollTimeout = setTimeout(() => {
@@ -1997,7 +1997,20 @@ async function ensureStoresAndCategoriesLoaded() {
 
 let _recipeModalLoading = false; // Prevent parallel modal loads
 
-async function openRecipeModalView(recipeId) {
+// ADDED: Send to iPad function
+window.sendRecipeToiPad = async function (recipeId) {
+  if (!recipeId) return;
+  try {
+    showToast('Sending to iPad...', 'info');
+    await Foodie.sendRecipeToTablet(recipeId);
+    showToast('Recipe sent to iPad!', 'success');
+  } catch (e) {
+    console.error('Failed to send recipe:', e);
+    showToast('Failed to send recipe. Is iPad connected?', 'error');
+  }
+};
+
+window.openRecipeModalView = async function (recipeId) {
   if (_recipeModalLoading) return;
   _recipeModalLoading = true;
 
@@ -2295,10 +2308,10 @@ function renderIngredientsTable() {
     const cleanedQtyText = cleanQtyText(r.QtyText || '');
     const catOptions = optionHtml_(META.categories, r.Category || '');
     const storeOptions = storeOptionsHtml_(effectiveStoreId);
-    
+
     // In view mode, display fractions; in edit mode, show decimals for easier editing
     const displayQtyNum = isView ? decimalToFraction(r.QtyNum) : (r.QtyNum ?? '');
-    
+
     if (idx === 0) {
       console.log('[renderIngredientsTable] First ingredient catOptions length:', catOptions.length, 'storeOptions length:', storeOptions.length);
       console.log('[renderIngredientsTable] catOptions preview:', catOptions.substring(0, 200));
@@ -2525,6 +2538,12 @@ document.addEventListener('click', async (e) => {
       e.stopImmediatePropagation();
       e.preventDefault();
       await showAddToCollectionModal(rid);
+      return;
+    } else if (action === 'send-to-ipad' && rid) { // ADDED: Send to iPad from list view
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      await sendRecipeToiPad(rid);
       return;
     }
     // For other actions (like clear-day), let event bubble to the next handler
@@ -3109,6 +3128,7 @@ function slotLine(date, slot, meal, mealIndex = 0, totalMeals = 1) {
   // Action buttons
   const actions = `
     <div class="meal-actions">
+      ${hasRecipe ? `<button class="card-action-btn ghost" data-action="send-to-ipad" data-rid="${escapeAttr(rid)}" data-tooltip="Send to iPad" data-tooltip-pos="top">📱</button>` : ''}
       ${hasRecipe ? `<button class="card-action-btn ghost" data-action="planner-view" data-rid="${escapeAttr(rid)}" data-tooltip="View Recipe" data-tooltip-pos="top">👁️</button>` : ''}
       ${hasRecipe ? `<button class="card-action-btn ghost" data-action="mark-cooked" data-rid="${escapeAttr(rid)}" data-tooltip="Mark as Cooked" data-tooltip-pos="top">🍳</button>` : ''}
       <button class="card-action-btn ghost" data-action="select-meal" data-date="${escapeAttr(date)}" data-slot="${escapeAttr(slot)}" ${mealId ? `data-meal-id="${mealId}"` : ''} data-tooltip="Change Meal" data-tooltip-pos="top">✏️</button>
@@ -3772,7 +3792,7 @@ async function showAssignCollectionModal(date, slot) {
           </div>
 
           <div style="display:flex;justify-content:flex-end;gap:12px;">
-            <button id="assignCollectionCancel" style="padding:14px 24px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;cursor:pointer;font-size:14px;color:#374151;">Cancel</button>
+            <button id="assignCollectionCancel" style="padding:14px 24px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;cursor:pointer;font-size:14px;color:#374151;font-weight:500;">Cancel</button>
             <button id="assignCollectionOk" disabled style="padding:14px 28px;border-radius:10px;font-weight:600;background:#2563eb;color:#ffffff;border:none;cursor:pointer;font-size:14px;box-shadow:0 4px 12px rgba(37,99,235,0.3);opacity:0.5;">Assign Collection</button>
           </div>
         `;
@@ -4019,7 +4039,7 @@ async function showAssignCollectionFromCollectionsTab(collectionId, collectionNa
       document.querySelector('[data-tab="planner"]').click();
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Reload the planner
+      // Reload the current planner view to show changes
       const currentStart = PLAN.start || ymd(new Date());
       const currentDays = PLAN.days || 7;
       await loadPlansIntoUi(currentStart, currentDays);
@@ -4659,7 +4679,7 @@ function renderShop_(groups) {
   // Normalize store comparison to handle undefined/null/empty StoreIds
   const normalizeStoreId = (sid) => (sid === null || sid === undefined || sid === '') ? 'unassigned' : String(sid);
   const normalizedFilter = normalizeStoreId(SHOP.storeFilter);
-  
+
   const filteredGroups = normalizedFilter === 'all'
     ? SHOP.groups
     : SHOP.groups.filter(g => normalizeStoreId(g.StoreId) === normalizedFilter);
@@ -4675,7 +4695,7 @@ function renderShop_(groups) {
       renderShop_(SHOP.groups);
       return;
     }
-    
+
     // If truly empty (even with 'all'), show empty state
     out.innerHTML = `
           <div class="empty-state">
@@ -4708,7 +4728,7 @@ function renderShop_(groups) {
     const name = getStoreNameById(sid);
     return name || `Store ${sid}`;
   };
-  
+
   const filterText = normalizedFilter === 'all'
     ? `${totalItems} item${totalItems !== 1 ? 's' : ''} across ${filteredGroups.length} store${filteredGroups.length !== 1 ? 's' : ''}`
     : `${totalItems} item${totalItems !== 1 ? 's' : ''} at ${getStoreName(SHOP.storeFilter)}`;
@@ -12593,7 +12613,7 @@ async function updateCompanionDevices() {
       const statusText = document.getElementById('companionStatusText');
 
       const pairedCount = result.devices.filter(d => d.authenticated).length;
-      
+
       if (result.devices.length === 0) {
         statusDot.classList.add('offline');
         statusText.textContent = 'Server ready (no devices)';
@@ -13721,6 +13741,13 @@ document.addEventListener('keydown', (e) => {
 
   // ========== NAVIGATION SHORTCUTS ==========
 
+  // Cmd/Ctrl+K - Command Palette
+  if (modKey && e.key === 'k') {
+    e.preventDefault();
+    openCommandPalette();
+    return;
+  }
+
   // Cmd/Ctrl+1 - Recipes tab
   if (modKey && e.key === '1') {
     e.preventDefault();
@@ -14579,6 +14606,9 @@ document.addEventListener('click', async (e) => {
     case 'view':
       await openRecipeModalView(rid);
       break;
+    case 'send-to-ipad':
+      await window.sendRecipeToiPad(rid);
+      break;
     case 'edit':
       await openRecipeModalEdit(rid);
       break;
@@ -14676,6 +14706,10 @@ async function showGridMealContextMenu(x, y, date, slot) {
         <span>👁️</span>
         <span>View: ${escapeHtml(meal.Title)}</span>
       </button>
+      <button class="context-menu-item" data-action="send-to-ipad" data-rid="${escapeAttr(meal.RecipeId || '')}">
+        <span>📱</span>
+        <span>Send to iPad</span>
+      </button>
       <button class="context-menu-item" data-action="change-grid-meal" data-date="${escapeAttr(date)}" data-slot="${escapeAttr(slot)}">
         <span>✏️</span>
         <span>Change ${escapeHtml(slot)}</span>
@@ -14696,6 +14730,10 @@ async function showGridMealContextMenu(x, y, date, slot) {
       <button class="context-menu-item" data-action="view-grid-meal" data-rid="${escapeAttr(item.RecipeId || '')}">
         <span>${typeIcon}</span>
         <span>${escapeHtml(item.Title)} <span style="color:var(--muted);font-size:11px;">(${item.ItemType || 'side'})</span></span>
+      </button>
+      <button class="context-menu-item" data-action="send-to-ipad" data-rid="${escapeAttr(item.RecipeId || '')}">
+        <span>📱</span>
+        <span>Send to iPad</span>
       </button>
     `;
   });
@@ -14735,6 +14773,88 @@ function hideGridMealContextMenu() {
   currentGridMealContext = null;
 }
 
+// Quick "Mark as Cooked" (Option/Alt + Click)
+document.addEventListener('click', async (e) => {
+  if (e.altKey || (IS_MAC && e.altKey)) { // e.altKey is Option on Mac
+    const mealEl = e.target.closest('.meal-title, .meal-line, .grid-meal');
+    if (mealEl) {
+      const rid = mealEl.getAttribute('data-rid');
+      const date = mealEl.getAttribute('data-date');
+      const slot = mealEl.getAttribute('data-slot');
+
+      if (rid && date && slot) {
+        e.preventDefault();
+        e.stopPropagation();
+        await toggleMarkCooked(rid, date, slot);
+        return;
+      }
+    }
+  }
+});
+
+// Toggle mark as cooked
+async function toggleMarkCooked(recipeId, date, slot) {
+  try {
+    const plan = PLAN.plansByDate[date];
+    if (!plan || !plan[slot]) return;
+
+    let meal = plan[slot];
+    // Handle array if multiple meals (just take first matching recipe for now)
+    // Also update the correct meal in the array if needed, but for simplicity we assume 1:1 or find match
+    if (Array.isArray(meal)) {
+      meal = meal.find(m => m.RecipeId == recipeId);
+    }
+
+    if (!meal) return;
+
+    const newStatus = !meal.IsCooked;
+
+    // Optimistic UI update
+    meal.IsCooked = newStatus;
+
+    // Find the DOM element and toggle class
+    const mealEl = document.querySelector(`.grid-meal[data-rid="${recipeId}"][data-date="${date}"][data-slot="${slot}"]`);
+    if (mealEl) {
+      if (newStatus) mealEl.classList.add('cooked');
+      else mealEl.classList.remove('cooked');
+    }
+
+    // Save to DB
+    const activeUserRes = await api('getActiveUser');
+    const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : '';
+
+    if (!userId) {
+      console.warn('Cannot save status: no active user');
+      return;
+    }
+
+    const res = await api('upsertUserPlanMeal', {
+      userId,
+      date: date,
+      slot: slot,
+      meal: {
+        ...meal, // Keep other props
+        IsCooked: newStatus
+      }
+    });
+
+    if (res.ok) {
+      showToast(newStatus ? 'Marked as Cooked' : 'Marked as Planned', 'success', 1000);
+    } else {
+      // Revert on failure
+      meal.IsCooked = !newStatus;
+      if (mealEl) {
+        if (!newStatus) mealEl.classList.add('cooked'); // Re-add if we failed to remove
+        else mealEl.classList.remove('cooked');
+      }
+      showToast('Failed to save status', 'error');
+    }
+
+  } catch (e) {
+    console.error('Failed to toggle cooked:', e);
+  }
+}
+
 /**
  * Handle grid meal context menu item clicks
  */
@@ -14752,6 +14872,12 @@ document.addEventListener('click', async (e) => {
       if (action === 'view-grid-meal' && rid) {
         hideGridMealContextMenu();
         await openRecipeModalView(rid);
+        return;
+      }
+
+      if (action === 'send-to-ipad' && rid) {
+        hideGridMealContextMenu();
+        await window.sendRecipeToiPad(rid);
         return;
       }
 

@@ -637,6 +637,10 @@ class CompanionServer {
           this.broadcastToOthers(deviceId, message);
           break;
 
+        case 'sous_chef_query':
+          await this.handleSousChefQuery(deviceId, message);
+          break;
+
         default:
           console.log(`Unknown message type: ${message.type}`);
       }
@@ -1497,6 +1501,109 @@ class CompanionServer {
     } catch (error) {
       console.error('Error pushing meals:', error);
       throw error;
+    }
+  }
+
+  // ADDED: Send Single Recipe to Tablets (Instant Open)
+  async pushRecipeToTablets(recipeId) {
+    console.log('📱 Pushing recipe', recipeId, 'to tablets...');
+    try {
+      // 1. Get Recipe & Ingredients
+      const recipeResult = await handleApiCall({
+        fn: 'getRecipe',
+        payload: { recipeId },
+        store: this.store
+      });
+
+      const ingredientsResult = await handleApiCall({
+        fn: 'listRecipeIngredients',
+        payload: { recipeId },
+        store: this.store
+      });
+
+      if (!recipeResult || !recipeResult.ok) {
+        throw new Error('Recipe not found');
+      }
+
+      // 2. Serialize
+      const serializedRecipe = this.serializeRecipe(recipeResult.recipe);
+
+      // Embed ingredients
+      const serializedIngredients = (ingredientsResult && ingredientsResult.ok && ingredientsResult.items)
+        ? ingredientsResult.items.map(ing => {
+          const s = this.serializeIngredient(ing);
+          return {
+            IngredientId: `${recipeId}-${ing.idx || 0}`,
+            IngredientName: s.IngredientNorm || s.IngredientRaw || 'Unknown',
+            QtyText: s.QtyText || '',
+            QtyNum: s.QtyNum,
+            Unit: s.Unit || '',
+            Category: s.Category || 'Other'
+          };
+        })
+        : [];
+
+      const recipeData = {
+        ...serializedRecipe,
+        ingredients: serializedIngredients
+      };
+
+      // 3. Send to iPads
+      // Use 'load_recipe' type for Instant Open behavior
+      return this.pushToDeviceType('ipad', {
+        type: 'recipe', // iOS ConnectionManager expects 'recipe' or 'load_recipe'
+        data: recipeData, // Wrap in data for consistency with other messages
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (error) {
+      console.error('Error pushing recipe:', error);
+      throw error;
+    }
+  }
+
+  // ADDED: Sous Chef Query Handler
+  async handleSousChefQuery(deviceId, message) {
+    const client = this.clients.get(deviceId);
+    if (!client) return;
+
+    const query = message.query;
+    console.log(`🤖 Sous Chef Query from ${client.name}: "${query}"`);
+
+    // Acknowledge receipt
+    client.ws.send(JSON.stringify({
+      type: 'sous_chef_status',
+      status: 'thinking'
+    }));
+
+    try {
+      // TODO: Connect to local Ollama here
+      // For now, simulate a response or basic logic
+
+      // Simulate network delay
+      await new Promise(r => setTimeout(r, 1000));
+
+      let responseText = "I'm still learning to cook! Please check the recipe details on your screen.";
+
+      // Simple offline keywords
+      if (query.toLowerCase().includes('substitute') && query.toLowerCase().includes('milk')) {
+        responseText = "You can usually substitute almond milk, soy milk, or oat milk in equal parts for regular milk. For baking, buttermilk (milk + vinegar) works great too!";
+      } else if (query.toLowerCase().includes('timer')) {
+        responseText = "I can set a timer for you. Just say 'Set timer for 10 minutes'.";
+      }
+
+      client.ws.send(JSON.stringify({
+        type: 'sous_chef_response',
+        query: query,
+        response: responseText
+      }));
+
+    } catch (error) {
+      console.error('Sous chef error:', error);
+      client.ws.send(JSON.stringify({
+        type: 'sous_chef_error',
+        message: 'Sorry, I had trouble thinking of an answer.'
+      }));
     }
   }
 

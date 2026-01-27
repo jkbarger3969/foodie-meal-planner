@@ -24,6 +24,10 @@
       <span>👁️</span>
       <span>View Recipe</span>
     </button>
+    <button class="context-menu-item" data-action="send-to-ipad">
+      <span>📱</span>
+      <span>Send to iPad</span>
+    </button>
     <button class="context-menu-item" data-action="edit">
       <span>✏️</span>
       <span>Edit Recipe</span>
@@ -63,18 +67,23 @@
   <header>
     <div style="margin-bottom: 12px;">
       <h1 style="margin: 0 0 4px 0;">Foodie Meal Planner</h1>
-      <div class="muted">Local desktop app (Planner + Bulk Planner + Recipes + Shopping List + Pantry + Admin) • SQLite
-        + Apple Calendar</div>
+
     </div>
     <div style="display:flex; align-items:center; gap:8px; flex-wrap:nowrap;">
       <div class="tabs" id="tabs" role="tablist" aria-label="Main navigation">
-        <button class="tab active" data-tab="home" role="tab" aria-selected="true" aria-controls="tab-home">🏠 Home</button>
-        <button class="tab" data-tab="planner" role="tab" aria-selected="false" aria-controls="tab-planner">📋 Planner</button>
-        <button class="tab" data-tab="recipes" role="tab" aria-selected="false" aria-controls="tab-recipes">📚 Recipes</button>
-        <button class="tab" data-tab="collections" role="tab" aria-selected="false" aria-controls="tab-collections">📦 Collections</button>
+        <button class="tab active" data-tab="home" role="tab" aria-selected="true" aria-controls="tab-home">🏠
+          Home</button>
+        <button class="tab" data-tab="planner" role="tab" aria-selected="false" aria-controls="tab-planner">📋
+          Planner</button>
+        <button class="tab" data-tab="recipes" role="tab" aria-selected="false" aria-controls="tab-recipes">📚
+          Recipes</button>
+        <button class="tab" data-tab="collections" role="tab" aria-selected="false" aria-controls="tab-collections">📦
+          Collections</button>
         <button class="tab" data-tab="shop" role="tab" aria-selected="false" aria-controls="tab-shop">🛒 Shop</button>
-        <button class="tab" data-tab="pantry" role="tab" aria-selected="false" aria-controls="tab-pantry">🥫 Pantry</button>
-        <button class="tab" data-tab="admin" role="tab" aria-selected="false" aria-controls="tab-admin">⚙️ Admin</button>
+        <button class="tab" data-tab="pantry" role="tab" aria-selected="false" aria-controls="tab-pantry">🥫
+          Pantry</button>
+        <button class="tab" data-tab="admin" role="tab" aria-selected="false" aria-controls="tab-admin">⚙️
+          Admin</button>
       </div>
       <div style="width:1px; height:24px; background:var(--line); margin:0 4px; flex-shrink:0;"></div>
       <button id="recentActionsFloatBtn" class="ghost" style="padding:6px 10px; font-size:14px; flex-shrink:0;"
@@ -173,7 +182,8 @@
           <div class="stat-card" onclick="document.querySelector('[data-tab=pantry]').click()">
             <div class="stat-icon">⚠️</div>
             <div class="stat-info">
-              <div class="stat-value"><span id="dashLowStockCount">0</span> <span id="dashLowStockLabel">Items</span></div>
+              <div class="stat-value"><span id="dashLowStockCount">0</span> <span id="dashLowStockLabel">Items</span>
+              </div>
               <div class="stat-label">Pantry Low Stock</div>
             </div>
           </div>
@@ -1577,6 +1587,8 @@
           <div class="muted" id="rmSub">View/Edit recipe + instructions + ingredients.</div>
         </div>
         <div class="actions">
+          <button class="ghost" onclick="sendRecipeToiPad(document.getElementById('recipeModalBack').dataset.recipeId)"
+            title="Send to iPad (Instant Open)">📱 Send to iPad</button>
           <button class="ghost" id="btnModalPrintRecipe">🖨️ Print</button>
           <button class="ghost" id="btnModalToggleEdit">Edit</button>
           <button class="ghost" id="btnModalClose">Close</button>
@@ -2166,7 +2178,8 @@
 
 
   <!-- Pantry item modal -->
-  <div id="pantryModalOverlay" class="modalBack" style="z-index:9999;" role="dialog" aria-modal="true" aria-labelledby="pantryModalTitle">
+  <div id="pantryModalOverlay" class="modalBack" style="z-index:9999;" role="dialog" aria-modal="true"
+    aria-labelledby="pantryModalTitle">
     <div class="modal animate-in" style="max-width:520px;">
       <div class="modalHead">
         <div>
@@ -2264,9 +2277,6 @@
       <button class="companion-action-btn" id="companionSendMeals" onclick="sendTodaysMealsToTablets()">
         🍽️ Send Today's Meals to iPad
       </button>
-      <button class="companion-action-btn" id="companionSendRecipe" onclick="sendCurrentRecipeToTablet()" disabled>
-        👨‍🍳 Send Current Recipe to iPad
-      </button>
     </div>
 
     <div class="hr"></div>
@@ -2283,8 +2293,10 @@
     <div style="margin-bottom:12px;">
       <strong style="font-size:13px;">Pairing Code</strong>
       <div style="margin-top:8px; display:flex; align-items:center; gap:10px;">
-        <code id="companionPairingCode" style="font-size:24px; font-weight:700; letter-spacing:4px; background:var(--bg-elevated); padding:8px 16px; border-radius:8px; color:var(--accent);">------</code>
-        <button class="mini ghost" id="companionRegenerateCode" onclick="regeneratePairingCode()" title="Generate new code">🔄</button>
+        <code id="companionPairingCode"
+          style="font-size:24px; font-weight:700; letter-spacing:4px; background:var(--bg-elevated); padding:8px 16px; border-radius:8px; color:var(--accent);">------</code>
+        <button class="mini ghost" id="companionRegenerateCode" onclick="regeneratePairingCode()"
+          title="Generate new code">🔄</button>
       </div>
       <div class="muted" style="font-size:11px; margin-top:6px;">Enter this code on your iOS device to pair</div>
     </div>
@@ -2299,7 +2311,8 @@
         3. Enter the 6-digit pairing code shown above
       </div>
       <div style="font-size:10px; color:var(--muted);">
-        Server: <code id="companionServerAddress" style="font-size:10px; background:rgba(0,0,0,0.2); padding:2px 6px; border-radius:4px;">Checking...</code>
+        Server: <code id="companionServerAddress"
+          style="font-size:10px; background:rgba(0,0,0,0.2); padding:2px 6px; border-radius:4px;">Checking...</code>
       </div>
     </div>
   </div>

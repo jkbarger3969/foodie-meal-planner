@@ -17,6 +17,10 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
     @Published var requiresPairing = false
     @Published var pairingError: String? = nil
     
+    // Sous Chef
+    @Published var sousChefResponse: String? = nil
+    @Published var sousChefStatus: String = "idle" // idle, thinking, error
+    
     // Persistent device ID for pairing
     private var deviceId: String {
         if let id = UserDefaults.standard.string(forKey: "foodie_device_id") {
@@ -375,6 +379,24 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
                     self.isPaired = false
                 }
                 print("❌ Server error: \(errorMsg)")
+
+            case "sous_chef_status":
+                if let status = json["status"] as? String {
+                    self.sousChefStatus = status
+                }
+
+            case "sous_chef_response":
+                if let response = json["response"] as? String {
+                    self.sousChefStatus = "idle"
+                    self.sousChefResponse = response
+                    // Notify observers? The @Published property will do that.
+                }
+
+            case "sous_chef_error":
+                 self.sousChefStatus = "error"
+                 if let msg = json["message"] as? String {
+                     self.sousChefResponse = "Error: \(msg)"
+                 }
                 
             default:
                 if let msgData = Message.from(data) {
@@ -462,6 +484,35 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
                 }
             } else {
                 print("✅ Message sent successfully")
+            }
+        }
+    }
+
+    func sendSousChefQuery(_ text: String) {
+        guard isConnected && isPaired else {
+            self.sousChefResponse = "Please connect to your computer first."
+            return
+        }
+        
+        // Reset state
+        self.sousChefResponse = nil
+        self.sousChefStatus = "thinking"
+        
+        let message: [String: Any] = [
+            "type": "sous_chef_query",
+            "query": text
+        ]
+        
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: message),
+              let jsonString = String(data: jsonData, encoding: .utf8) else { return }
+        
+        webSocket?.send(.string(jsonString)) { [weak self] error in
+            if let error = error {
+                print("❌ Sous Chef send error: \(error)")
+                DispatchQueue.main.async {
+                    self?.sousChefStatus = "error"
+                    self?.sousChefResponse = "Failed to send query."
+                }
             }
         }
     }
