@@ -77,11 +77,16 @@
         <div class="tab" data-tab="admin">⚙️ Admin</div>
       </div>
       <div style="width:1px; height:24px; background:var(--line); margin:0 4px; flex-shrink:0;"></div>
-      <button id="recentActionsFloatBtn" class="ghost"
-        style="padding:6px 10px; font-size:14px; flex-shrink:0;">🕐</button>
-      <button id="companionFloatBtn" class="ghost" style="padding:6px 10px; font-size:14px; flex-shrink:0;">📱</button>
-      <button id="contextualHelpBtn" class="ghost" style="padding:6px 10px; font-size:14px; flex-shrink:0;">❓</button>
-      <button id="btnStartTour" class="ghost" style="padding:6px 10px; font-size:14px; flex-shrink:0;">🎯</button>
+      <button id="recentActionsFloatBtn" class="ghost" style="padding:6px 10px; font-size:14px; flex-shrink:0;"
+        data-tooltip="Recent Actions - View activity and undo changes" data-tooltip-pos="bottom"
+        title="Recent Actions">🕐</button>
+      <button id="companionFloatBtn" class="ghost" style="padding:6px 10px; font-size:14px; flex-shrink:0;"
+        data-tooltip="Companion Devices - Send to iPhone/iPad" data-tooltip-pos="bottom"
+        title="Companion Devices">📱</button>
+      <button id="contextualHelpBtn" class="ghost" style="padding:6px 10px; font-size:14px; flex-shrink:0;"
+        data-tooltip="Help - Get help for this page" data-tooltip-pos="bottom" title="Help">❓</button>
+      <button id="btnStartTour" class="ghost" style="padding:6px 10px; font-size:14px; flex-shrink:0;"
+        data-tooltip="App Tour - Take a guided tour" data-tooltip-pos="bottom" title="App Tour">🎯</button>
       <div class="user-switcher" style="flex-shrink:0;">
         <button id="btnUserSwitcher" class="user-switcher-btn" style="padding:6px 10px; font-size:12px;">
           <span id="activeUserAvatar">👨‍👩‍👧‍👦</span>
@@ -848,7 +853,7 @@
         <button class="danger" id="btnClearShop" data-tooltip="Remove all items from shopping list"
           data-tooltip-pos="bottom">Clear list</button>
       </div>
-      
+
       <!-- Store Filter and Options Row -->
       <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px;">
         <label style="display: flex; align-items: center; gap: 6px;">
@@ -863,8 +868,8 @@
           <input type="checkbox" id="shopIncludeLowStock" style="cursor: pointer; width: 14px; height: 14px;">
           <span style="color: #666;">Add low-stock pantry items</span>
         </label>
-        <button class="ghost" id="btnSendToPhone" style="margin-left: auto;" data-tooltip="Send shopping list to connected iPhone"
-          data-tooltip-pos="bottom">📱 Send to Phone</button>
+        <button class="ghost" id="btnSendToPhone" style="margin-left: auto;"
+          data-tooltip="Send shopping list to connected iPhone" data-tooltip-pos="bottom">📱 Send to Phone</button>
       </div>
 
       <!-- Collection Inclusion Section -->
@@ -2276,7 +2281,7 @@
     <div style="font-size:12px; color:var(--text); background:rgba(77,163,255,0.1); padding:10px; border-radius:8px;">
       <div style="font-weight:600; margin-bottom:4px;">Configure iOS Apps:</div>
       <div style="font-size:11px; color:var(--muted); margin-bottom:6px;">
-        iPhone: Enter full address<br>
+        iPhone: Enter full address (only if your device does not auto connect)<br>
         iPad: Enter IP only (no ws:// or :8080)
       </div>
       <code id="companionServerAddress"

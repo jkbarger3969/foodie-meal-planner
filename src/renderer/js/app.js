@@ -1297,10 +1297,24 @@ function renderRecipes() {
 
   console.log(`[renderRecipes] Start. total RECIPES: ${RECIPES.length}, query: "${CURRENT_QUERY}"`);
 
+  // Determine if this is a Jump A-Z single letter query
+  const isJumpAZ = CURRENT_QUERY && CURRENT_QUERY.length === 1 && /^[a-zA-Z]$/.test(CURRENT_QUERY);
+
   // PHASE 9.4: Use indexed search if CURRENT_QUERY exists
   let recipesToShow;
   try {
-    recipesToShow = CURRENT_QUERY ? searchRecipesIndexed_(CURRENT_QUERY) : RECIPES;
+    if (isJumpAZ) {
+      // For A-Z jump, filter by title starting with the letter
+      const letter = CURRENT_QUERY.toLowerCase();
+      recipesToShow = RECIPES.filter(r => {
+        const title = (r.Title || '').toLowerCase();
+        return title.startsWith(letter);
+      });
+    } else if (CURRENT_QUERY) {
+      recipesToShow = searchRecipesIndexed_(CURRENT_QUERY);
+    } else {
+      recipesToShow = RECIPES;
+    }
   } catch (searchErr) {
     console.error('[renderRecipes] Search index failed, falling back to linear search', searchErr);
     recipesToShow = RECIPES.filter(r => (r.Title || '').toLowerCase().includes((CURRENT_QUERY || '').toLowerCase()));
@@ -2472,28 +2486,37 @@ document.addEventListener('click', async (e) => {
   }
 
   if (actionBtn) {
-    e.stopPropagation();
-    e.stopImmediatePropagation(); // Ensure no other listeners fire
-    e.preventDefault();
-
     const action = actionBtn.getAttribute('data-action');
     const rid = actionBtn.getAttribute('data-rid');
 
     console.log('[Click] Handling action:', action, 'for recipe:', rid);
 
+    // Only handle recipe-card specific actions here, let other actions bubble
     if (action === 'recipe-favorite' && rid) {
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      e.preventDefault();
       try {
         await toggleRecipeFavorite(rid);
       } catch (err) {
         console.error('[Click] Error in toggleRecipeFavorite:', err);
       }
+      return;
     } else if (action === 'quick-assign' && rid) {
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      e.preventDefault();
       const today = ymd(new Date());
       await showQuickAssignModal(rid, today);
+      return;
     } else if (action === 'quick-collection' && rid) {
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      e.preventDefault();
       await showAddToCollectionModal(rid);
+      return;
     }
-    return;
+    // For other actions (like clear-day), let event bubble to the next handler
   }
 
   // Skip opening recipe view if a favorite toggle is in progress
@@ -2974,36 +2997,56 @@ async function loadPlansIntoUi(start, days) {
 async function renderAdditionalItemsAsync_(date, slot) {
   try {
     const result = await api('getAdditionalItems', { date, slot });
-    if (!result.ok || !result.items || result.items.length === 0) {
-      return '';
+    const items = (result.ok && result.items) ? result.items : [];
+
+    // If no items, just show the add button
+    if (items.length === 0) {
+      return `
+          <div class="additional-items">
+            <button class="btn-add-additional" data-date="${escapeAttr(date)}" data-slot="${escapeAttr(slot)}">
+              + Add Side Dish/Dessert
+            </button>
+          </div>
+        `;
     }
 
-    const items = result.items;
+    // Build items HTML for expanded view
     const itemsHtml = items.map(item => `
-          <div class="additional-item" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(77,163,255,0.1);">
-            <span class="item-type-badge" style="background:#4da3ff;color:white;padding:3px 8px;border-radius:4px;font-size:10px;text-transform:uppercase;font-weight:600;">${escapeHtml(item.ItemType || 'side')}</span>
-            <span class="item-title" style="flex:1;font-size:13px;color:#e5e7eb;font-weight:500;">${escapeHtml(item.Title || '')}</span>
+          <div class="additional-item">
+            <span class="item-type-badge">${escapeHtml(item.ItemType || 'side')}</span>
+            <span class="item-title">${escapeHtml(item.Title || '')}</span>
             <button class="ghost" data-action="planner-view" data-rid="${escapeAttr(item.RecipeId)}" style="padding:4px 8px;font-size:11px;">View</button>
-            <button class="btn-remove-additional" data-id="${item.id}" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:14px;padding:4px 8px;" title="Remove">×</button>
+            <button class="btn-remove-additional" data-id="${item.id}" data-date="${escapeAttr(date)}" data-slot="${escapeAttr(slot)}" title="Remove">×</button>
           </div>
         `).join('');
 
+    // Use details/summary for collapsible display
     return `
-          <div class="additional-items" style="margin-top:10px;padding:12px;background:rgba(77,163,255,0.05);border:1px solid rgba(77,163,255,0.2);border-radius:8px;">
-            <div class="additional-items-header" style="font-size:12px;color:#6b7280;font-weight:600;margin-bottom:8px;">
-              + ${items.length} additional item(s)
-            </div>
-            <div class="additional-items-list">
-              ${itemsHtml}
-            </div>
-            <button class="btn-add-additional" data-date="${escapeAttr(date)}" data-slot="${escapeAttr(slot)}" style="margin-top:10px;padding:8px 16px;background:#4da3ff;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">
-              + Add Another
-            </button>
+          <div class="additional-items">
+            <details class="side-dish-details">
+              <summary>
+                ${items.length} side dish${items.length === 1 ? '' : 'es'}/dessert${items.length === 1 ? '' : 's'}
+              </summary>
+              <div>
+                <div class="additional-items-list">
+                  ${itemsHtml}
+                </div>
+                <button class="btn-add-additional" data-date="${escapeAttr(date)}" data-slot="${escapeAttr(slot)}">
+                  + Add Another
+                </button>
+              </div>
+            </details>
           </div>
         `;
   } catch (e) {
     console.warn('Error loading additional items:', e);
-    return '';
+    return `
+          <div class="additional-items">
+            <button class="btn-add-additional" data-date="${escapeAttr(date)}" data-slot="${escapeAttr(slot)}">
+              + Add Side Dish/Dessert
+            </button>
+          </div>
+        `;
   }
 }
 
@@ -3055,9 +3098,10 @@ function slotLine(date, slot, meal, mealIndex = 0, totalMeals = 1) {
   // Action buttons
   const actions = `
     <div class="meal-actions">
-      ${hasRecipe ? `<button class="card-action-btn ghost" data-action="planner-view" data-rid="${escapeAttr(rid)}" title="View">👁️</button>` : ''}
-      <button class="card-action-btn ghost" data-action="select-meal" data-date="${escapeAttr(date)}" data-slot="${escapeAttr(slot)}" ${mealId ? `data-meal-id="${mealId}"` : ''} title="Change">✏️</button>
-      ${totalMeals > 1 ? `<button class="card-action-btn ghost danger" data-action="delete-user-meal" data-meal-id="${mealId}" data-date="${escapeAttr(date)}" data-slot="${escapeAttr(slot)}" title="Remove">✕</button>` : ''}
+      ${hasRecipe ? `<button class="card-action-btn ghost" data-action="planner-view" data-rid="${escapeAttr(rid)}" data-tooltip="View Recipe" data-tooltip-pos="top">👁️</button>` : ''}
+      ${hasRecipe ? `<button class="card-action-btn ghost" data-action="mark-cooked" data-rid="${escapeAttr(rid)}" data-tooltip="Mark as Cooked" data-tooltip-pos="top">🍳</button>` : ''}
+      <button class="card-action-btn ghost" data-action="select-meal" data-date="${escapeAttr(date)}" data-slot="${escapeAttr(slot)}" ${mealId ? `data-meal-id="${mealId}"` : ''} data-tooltip="Change Meal" data-tooltip-pos="top">✏️</button>
+      ${totalMeals > 1 ? `<button class="card-action-btn ghost danger" data-action="delete-user-meal" data-meal-id="${mealId}" data-date="${escapeAttr(date)}" data-slot="${escapeAttr(slot)}" data-tooltip="Remove Meal" data-tooltip-pos="top">✕</button>` : ''}
     </div>
   `;
 
@@ -3193,7 +3237,7 @@ function renderPlanner(containerId, start, days, includeSwap) {
             <div class="planner-day-title">${dayName}</div>
             <div class="day-subtitle">${formattedDate}</div>
           </div>
-          <button class="card-action-btn ghost" title="Clear Day" data-action="clear-day" data-date="${escapeAttr(date)}">✕</button>
+          <button class="card-action-btn ghost" data-tooltip="Clear Todays Meals" data-tooltip-pos="left" data-action="clear-day" data-date="${escapeAttr(date)}">✕</button>
         </div>
         ${renderSlot('Breakfast', breakfast, 'breakfast')}
         ${renderSlot('Lunch', lunch, 'lunch')}
@@ -3411,7 +3455,7 @@ async function showAddAdditionalItemModal(date, slot) {
                 </select>
               </div>
             </div>
-            <div id="addItemResults" style="max-height:250px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:16px;"></div>
+            <div id="addItemResults" style="max-height:400px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:16px;"></div>
           </div>
 
           <div style="padding:20px 28px;border-top:1px solid #e5e7eb;background:#fafafa;">
@@ -3496,7 +3540,7 @@ async function showAddAdditionalItemModal(date, slot) {
         const mealTypeMatch = !mealTypeFilterValue || (recipe.MealType || '').toLowerCase() === mealTypeFilterValue.toLowerCase();
 
         return textMatch && mealTypeMatch;
-      }).slice(0, 20);
+      });
 
       console.log('[addItemSearch] Found', matchedRecipes.length, 'matches');
 
@@ -3793,8 +3837,215 @@ async function showAssignCollectionModal(date, slot) {
   });
 }
 
-// Show modal to assign collection from Collections tab - prompts for date and slot
+// Show modal to assign collection to a specific meal slot (Breakfast, Lunch, or Dinner)
 async function showAssignCollectionFromCollectionsTab(collectionId, collectionName) {
+  // Get collection recipes first
+  const res = await api('listCollectionRecipes', { collectionId });
+  if (!res.ok || !res.recipes || res.recipes.length === 0) {
+    showToast(`No recipes found in "${collectionName}"`, 'info');
+    return;
+  }
+
+  const recipes = res.recipes;
+
+  const cleanup = () => {
+    if (card) card.remove();
+    if (ov) ov.remove();
+  };
+
+  const ov = document.createElement('div');
+  ov.className = 'modal-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
+
+  const card = document.createElement('div');
+  card.className = 'modal-card';
+  // Match the new 'Assign to Day' style
+  card.style.cssText = 'min-width:600px;max-width:90vw;max-height:85vh;height:auto;display:flex;flex-direction:column; background:var(--card-elevated); color:var(--text); padding:24px; border-radius:12px;';
+
+  card.innerHTML = `
+        <h3 style="margin-top:0;margin-bottom:16px;font-size:20px;">🍽️ Assign Collection to Meal</h3>
+        <div style="background:rgba(77,163,255,0.1);border:1px solid rgba(77,163,255,0.3);border-radius:8px;padding:12px;margin-bottom:16px;">
+          <div style="font-weight:600;color:var(--text);">${escapeHtml(collectionName)}</div>
+          <div style="font-size:12px;color:var(--muted);">${recipes.length} recipe${recipes.length === 1 ? '' : 's'} in collection</div>
+        </div>
+        
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+          <div>
+            <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:600;">Select Date:</label>
+            <input type="date" id="assignCollectionDate" style="width:100%;padding:10px 12px;border-radius:8px;font-size:14px;box-sizing:border-box; background:var(--bg-darker); border:1px solid var(--line); color:var(--text);" />
+          </div>
+          <div>
+            <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:600;">Select Meal Slot:</label>
+            <select id="assignCollectionSlot" style="width:100%;padding:10px 12px;border-radius:8px;font-size:14px;cursor:pointer; background:var(--bg-darker); border:1px solid var(--line); color:var(--text);">
+              <option value="">-- Choose a slot --</option>
+              <option value="Breakfast">Breakfast</option>
+              <option value="Lunch">Lunch</option>
+              <option value="Dinner">Dinner</option>
+            </select>
+          </div>
+        </div>
+        
+        <div style="margin-bottom:16px; flex:1; overflow-y:auto; padding-right:4px;">
+           <div style="font-size:13px;font-weight:600;margin-bottom:12px;">Assign recipes:</div>
+           
+           <div class="assign-day-block" style="background:var(--bg-darker); border:1px solid var(--line); border-radius:8px; padding:12px;">
+             <!-- Main Dish Selector -->
+             <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+               <span style="font-size:12px; width:40px; color:var(--muted);">Main:</span>
+               <select id="assignCollectionMain" style="flex:1; padding:6px; border-radius:6px; font-size:13px; background:var(--card); border:1px solid var(--line); color:var(--text);">
+                <option value="">-- Select Main Dish --</option>
+                ${recipes.map(r => `<option value="${escapeAttr(r.RecipeId)}">${escapeHtml(r.Title)}</option>`).join('')}
+              </select>
+            </div>
+            
+            <!-- Dynamic Sides Container -->
+            <div id="assignCollectionSidesContainer">
+               <!-- Sides added dynamically -->
+            </div>
+            
+            <button id="assignCollectionAddSide" class="ghost" style="font-size:11px; padding:4px 8px; width:100%; border:1px dashed var(--line-strong); margin-top:4px; cursor:pointer;">+ Add Side Dish</button>
+           </div>
+        </div>
+        
+        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:auto;">
+          <button id="assignCollectionCancel" style="padding:10px 20px;background:var(--bg-darker);color:var(--text);border:1px solid var(--line);border-radius:8px;cursor:pointer;font-weight:600;">Cancel</button>
+          <button id="assignCollectionOk" style="padding:10px 20px;background:var(--accent);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;">Assign Collection</button>
+        </div>
+  `;
+
+  ov.appendChild(card);
+  document.body.appendChild(ov);
+
+  const dateInput = card.querySelector('#assignCollectionDate');
+  const slotSelect = card.querySelector('#assignCollectionSlot');
+  const mainSelect = card.querySelector('#assignCollectionMain');
+  const sidesContainer = card.querySelector('#assignCollectionSidesContainer');
+  const addSideBtn = card.querySelector('#assignCollectionAddSide');
+  const okBtn = card.querySelector('#assignCollectionOk');
+  const cancelBtn = card.querySelector('#assignCollectionCancel');
+
+  // Set default date to today
+  const today = new Date();
+  dateInput.value = today.toISOString().split('T')[0];
+
+  // Auto-select first recipe as main if available
+  if (recipes.length > 0) {
+    mainSelect.value = recipes[0].RecipeId;
+  }
+
+  // Pre-populate side dishes if > 1 recipe
+  if (recipes.length > 1) {
+    for (let i = 1; i < recipes.length; i++) {
+      addSideRow(recipes[i].RecipeId);
+    }
+  }
+
+  function addSideRow(selectedId = '') {
+    const div = document.createElement('div');
+    div.className = 'assign-side-row';
+    div.style.cssText = 'display:flex; gap:8px; margin-bottom:8px; align-items:center; animation:fadeInScale 0.2s ease-out;';
+    div.innerHTML = `
+         <span style="font-size:12px; width:40px; color:var(--muted); text-align:right;">Side:</span>
+         <select class="assign-side-select" style="flex:1; padding:6px; border-radius:6px; font-size:13px; background:var(--card); border:1px solid var(--line); color:var(--text);">
+            <option value="">-- Select Side --</option>
+            ${recipes.map(r => `<option value="${escapeAttr(r.RecipeId)}">${escapeHtml(r.Title)}</option>`).join('')}
+         </select>
+         <button class="btn-remove-side-row" style="background:none; border:none; color:var(--danger); cursor:pointer;">✕</button>
+      `;
+    sidesContainer.appendChild(div);
+
+    const sel = div.querySelector('select');
+    if (selectedId) sel.value = selectedId;
+
+    div.querySelector('.btn-remove-side-row').onclick = () => div.remove();
+  }
+
+  addSideBtn.addEventListener('click', () => addSideRow());
+  cancelBtn.addEventListener('click', () => cleanup(false));
+  ov.addEventListener('click', (ev) => { if (ev.target === ov) cleanup(false); });
+
+  okBtn.addEventListener('click', async () => {
+    const date = dateInput.value;
+    const slot = slotSelect.value;
+    const mainRid = mainSelect.value;
+
+    if (!date) { showToast('Please select a date', 'warning'); return; }
+    if (!slot) { showToast('Please select a meal slot', 'warning'); return; }
+
+    okBtn.disabled = true;
+    okBtn.textContent = 'Assigning...';
+
+    try {
+      // Get active user
+      const activeUserRes = await api('getActiveUser', {});
+      const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
+
+      // 1. Assign Main Dish
+      if (mainRid) {
+        const r = recipes.find(x => x.RecipeId === mainRid);
+        await api('upsertUserPlanMeal', {
+          userId, date, slot,
+          meal: { RecipeId: mainRid, Title: r ? r.Title : 'Recipe' }
+        });
+      }
+
+      // 2. Assign Side Dishes
+      const sideSelects = sidesContainer.querySelectorAll('.assign-side-select');
+      for (const sSel of sideSelects) {
+        const sideRid = sSel.value;
+        if (sideRid) {
+          const r = recipes.find(x => x.RecipeId === sideRid);
+          await api('addAdditionalItem', {
+            date, slot,
+            recipeId: sideRid,
+            title: r ? r.Title : 'Side Dish',
+            itemType: 'side'
+          });
+        }
+      }
+
+      // Switch to Meal Planner tab
+      document.querySelector('[data-tab="planner"]').click();
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Reload the planner
+      const currentStart = PLAN.start || ymd(new Date());
+      const currentDays = PLAN.days || 7;
+      await loadPlansIntoUi(currentStart, currentDays);
+
+      // Wait for render
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Scroll to assigned date
+      const dayElement = document.querySelector(`#planList [data-day="${date}"]`);
+      if (dayElement) {
+        dayElement.open = true;
+        dayElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      cleanup(true);
+      showToast(`Collection items assigned to ${slot} on ${date}`, 'success');
+    } catch (err) {
+      console.error('Error assigning collection:', err);
+      showToast('Error: ' + err.message, 'error');
+      okBtn.disabled = false;
+      okBtn.textContent = 'Assign Collection';
+    }
+  });
+}
+
+// Show modal to assign collection to a full day (Breakfast, Lunch, Dinner)
+async function showAssignCollectionToDayModal(collectionId, collectionName) {
+  // Get collection recipes first
+  const res = await api('listCollectionRecipes', { collectionId });
+  if (!res.ok || !res.recipes || res.recipes.length === 0) {
+    showToast(`No recipes found in "${collectionName}"`, 'info');
+    return;
+  }
+
+  const recipes = res.recipes;
+  const recipeCount = recipes.length;
+
   const cleanup = (ok) => {
     if (card) card.remove();
     if (ov) ov.remove();
@@ -3806,130 +4057,205 @@ async function showAssignCollectionFromCollectionsTab(collectionId, collectionNa
 
   const card = document.createElement('div');
   card.className = 'modal-card';
-  card.style.cssText = 'background:#fff;border-radius:12px;padding:24px;min-width:400px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.3);';
+  card.style.cssText = 'background:var(--card-elevated); border-radius:12px; padding:24px; min-width:550px; max-width:90vw; max-height:90vh; display:flex; flex-direction:column; color:var(--text);';
+
   card.innerHTML = `
-        <h3 style="margin-top:0;margin-bottom:16px;color:#111;font-size:20px;">Assign Collection to Meal Plan</h3>
-        <p style="margin-bottom:16px;color:#374151;font-size:14px;">
-          Collection: <strong>${escapeHtml(collectionName)}</strong>
-        </p>
-        
-        <div style="margin-bottom:16px;">
-          <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:600;color:#374151;">Select Date:</label>
-          <input type="date" id="assignCollectionDate" style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#111111;color-scheme:light;" />
+    <h3 style="margin-top:0;margin-bottom:16px;font-size:20px;">📆 Assign Collection to Day</h3>
+    <div style="background:rgba(77,163,255,0.1);border:1px solid rgba(77,163,255,0.3);border-radius:8px;padding:12px;margin-bottom:16px;">
+      <div style="font-weight:600;margin-bottom:4px;color:var(--text);">${escapeHtml(collectionName)}</div>
+      <div style="font-size:12px;color:var(--muted);">${recipeCount} recipe${recipeCount === 1 ? '' : 's'} in collection</div>
+    </div>
+    
+    <div style="margin-bottom:16px;">
+      <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:600;">Select Date:</label>
+      <input type="date" id="assignDayDate" style="width:100%;padding:10px 12px;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+    </div>
+    
+    <div style="margin-bottom:20px; flex:1; overflow-y:auto; padding-right:4px;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:12px;">Assign recipes to meals:</div>
+      
+      <!-- Breakfast Block -->
+      <div class="assign-day-block" style="background:var(--bg-darker); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+          <span style="font-size:16px;">🌅</span>
+          <span style="font-weight:600; font-size:14px;">Breakfast</span>
         </div>
         
-        <div style="margin-bottom:20px;">
-          <label style="display:block;margin-bottom:4px;font-size:13px;font-weight:600;color:#374151;">Select Meal Slot:</label>
-          <select id="assignCollectionSlot" style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;background:#fff;cursor:pointer;color:#111111;">
-            <option value="">-- Choose a slot --</option>
-            <option value="Breakfast">Breakfast</option>
-            <option value="Lunch">Lunch</option>
-            <option value="Dinner">Dinner</option>
+        <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+          <span style="font-size:12px; width:40px; color:var(--muted);">Main:</span>
+          <select class="assign-main-select" data-slot="Breakfast" style="flex:1; padding:6px; border-radius:6px; font-size:13px;">
+            <option value="">-- None --</option>
+            ${recipes.map(r => `<option value="${escapeAttr(r.RecipeId)}">${escapeHtml(r.Title)}</option>`).join('')}
           </select>
         </div>
         
-        <div style="display:flex;gap:10px;justify-content:flex-end;">
-          <button id="assignCollectionCancel" style="padding:10px 20px;background:#e5e7eb;color:#374151;border:none;border-radius:8px;cursor:pointer;font-weight:600;">Cancel</button>
-          <button id="assignCollectionOk" style="padding:10px 20px;background:#10b981;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;" disabled>Assign Collection</button>
+        <div class="assign-sides-container" data-slot="Breakfast">
+           <!-- Sides added dynamically -->
         </div>
-      `;
+        
+        <button class="ghost btn-add-side-to-day" data-slot="Breakfast" style="font-size:11px; padding:4px 8px; width:100%; border:1px dashed var(--line-strong); margin-top:4px;">+ Add Side Dish</button>
+      </div>
+
+      <!-- Lunch Block -->
+      <div class="assign-day-block" style="background:var(--bg-darker); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+          <span style="font-size:16px;">☀️</span>
+          <span style="font-weight:600; font-size:14px;">Lunch</span>
+        </div>
+        
+        <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+           <span style="font-size:12px; width:40px; color:var(--muted);">Main:</span>
+           <select class="assign-main-select" data-slot="Lunch" style="flex:1; padding:6px; border-radius:6px; font-size:13px;">
+            <option value="">-- None --</option>
+            ${recipes.map(r => `<option value="${escapeAttr(r.RecipeId)}">${escapeHtml(r.Title)}</option>`).join('')}
+          </select>
+        </div>
+         <div class="assign-sides-container" data-slot="Lunch"></div>
+         <button class="ghost btn-add-side-to-day" data-slot="Lunch" style="font-size:11px; padding:4px 8px; width:100%; border:1px dashed var(--line-strong); margin-top:4px;">+ Add Side Dish</button>
+      </div>
+
+      <!-- Dinner Block -->
+      <div class="assign-day-block" style="background:var(--bg-darker); border:1px solid var(--line); border-radius:8px; padding:12px;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+          <span style="font-size:16px;">🌙</span>
+          <span style="font-weight:600; font-size:14px;">Dinner</span>
+        </div>
+        
+        <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+           <span style="font-size:12px; width:40px; color:var(--muted);">Main:</span>
+           <select class="assign-main-select" data-slot="Dinner" style="flex:1; padding:6px; border-radius:6px; font-size:13px;">
+            <option value="">-- None --</option>
+            ${recipes.map(r => `<option value="${escapeAttr(r.RecipeId)}">${escapeHtml(r.Title)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="assign-sides-container" data-slot="Dinner"></div>
+        <button class="ghost btn-add-side-to-day" data-slot="Dinner" style="font-size:11px; padding:4px 8px; width:100%; border:1px dashed var(--line-strong); margin-top:4px;">+ Add Side Dish</button>
+      </div>
+    
+    </div>
+    
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:auto;">
+      <button id="assignDayCancel" style="padding:10px 20px;background:var(--bg-darker);color:var(--text);border:1px solid var(--line);border-radius:8px;cursor:pointer;font-weight:600;">Cancel</button>
+      <button id="assignDayOk" style="padding:10px 20px;background:var(--accent);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;">Assign to Day</button>
+    </div>
+  `;
 
   ov.appendChild(card);
   document.body.appendChild(ov);
 
-  const dateInput = card.querySelector('#assignCollectionDate');
-  const slotSelect = card.querySelector('#assignCollectionSlot');
-  const okBtn = card.querySelector('#assignCollectionOk');
+  const dateInput = card.querySelector('#assignDayDate');
+  const mainSelects = card.querySelectorAll('.assign-main-select');
+  const cancelBtn = card.querySelector('#assignDayCancel');
+  const okBtn = card.querySelector('#assignDayOk');
 
   // Set default date to today
   const today = new Date();
   dateInput.value = today.toISOString().split('T')[0];
 
-  // Enable OK button when slot is selected
-  const validateForm = () => {
-    okBtn.disabled = !dateInput.value || !slotSelect.value;
-  };
+  // Auto-suggest recipes based on count (simple default)
+  const meals = ['Breakfast', 'Lunch', 'Dinner'];
+  if (recipeCount >= 1) mainSelects[2].value = recipes[0].RecipeId; // Dinner
+  if (recipeCount >= 2) mainSelects[1].value = recipes[1].RecipeId; // Lunch
+  if (recipeCount >= 3) mainSelects[0].value = recipes[2].RecipeId; // Breakfast
 
-  dateInput.addEventListener('change', validateForm);
-  slotSelect.addEventListener('change', validateForm);
+  // Side Dish Logic
+  card.addEventListener('click', (e) => {
+    if (e.target.classList.contains('btn-add-side-to-day')) {
+      const slot = e.target.dataset.slot;
+      const container = card.querySelector(`.assign-sides-container[data-slot="${slot}"]`);
 
-  card.querySelector('#assignCollectionCancel').addEventListener('click', () => cleanup(false));
+      const div = document.createElement('div');
+      div.className = 'assign-side-row';
+      div.style.cssText = 'display:flex; gap:8px; margin-bottom:8px; align-items:center; animation:fadeInScale 0.2s ease-out;';
+      div.innerHTML = `
+         <span style="font-size:12px; width:40px; color:var(--muted); text-align:right;">Side:</span>
+         <select class="assign-side-select" data-slot="${slot}" style="flex:1; padding:6px; border-radius:6px; font-size:13px; background:var(--bg-darker); border:1px solid var(--line); color:var(--text);">
+            <option value="">-- Select Side --</option>
+            ${recipes.map(r => `<option value="${escapeAttr(r.RecipeId)}">${escapeHtml(r.Title)}</option>`).join('')}
+         </select>
+         <button class="btn-remove-side-row" style="background:none; border:none; color:var(--danger); cursor:pointer;">✕</button>
+      `;
+      container.appendChild(div);
 
-  card.querySelector('#assignCollectionOk').addEventListener('click', async () => {
-    const date = dateInput.value;
-    const slot = slotSelect.value;
-
-    if (!date || !slot) return;
-
-    console.log('[assignCollectionFromCollectionsTab] Assigning collection', collectionId, 'to', date, slot);
-
-    const result = await api('assignCollectionToSlot', {
-      date,
-      slot,
-      collectionId
-    });
-
-    console.log('[assignCollectionFromCollectionsTab] API result:', result);
-
-    if (result.ok) {
-      // Switch to Meal Planner tab FIRST
-      document.querySelector('[data-tab="planner"]').click();
-
-      // Wait for tab switch to complete
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Determine the best start date for the view
-      // If the assigned date is within the current view, keep current view
-      // Otherwise, start from today or the assigned date (whichever is earlier)
-      const currentStart = PLAN.start || ymd(new Date());
-      const currentDays = PLAN.days || 7;
-      const assignedDate = new Date(date);
-      const currentStartDate = new Date(currentStart);
-      const currentEndDate = new Date(currentStartDate);
-      currentEndDate.setDate(currentEndDate.getDate() + currentDays - 1);
-
-      let startDate;
-      let days;
-
-      // Check if assigned date is within current view
-      if (assignedDate >= currentStartDate && assignedDate <= currentEndDate) {
-        // Keep current view - assigned date is already visible
-        startDate = currentStart;
-        days = currentDays;
-        console.log('[assignCollectionFromCollectionsTab] Assigned date within current view, keeping view:', startDate);
-      } else {
-        // Assigned date is outside current view
-        // Start from today or assigned date (whichever is earlier) to show context
-        const today = new Date();
-        const earliestDate = assignedDate < today ? assignedDate : today;
-        startDate = ymd(earliestDate);
-        days = 7;
-        console.log('[assignCollectionFromCollectionsTab] Assigned date outside view, adjusting to:', startDate);
-      }
-
-      await loadPlansIntoUi(startDate, days);
-
-      // Wait for render to complete (includes additional items timeout)
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      // Force scroll to the assigned date and expand the details
-      const dayElement = document.querySelector(`#planList [data-day="${date}"]`);
-      if (dayElement) {
-        dayElement.open = true;  // Ensure details is expanded
-        dayElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-
-      // Close modal
-      cleanup(true);
-
-      // Show success message
-      showToast(`Collection "${collectionName}" assigned to ${slot} on ${date}`, 'success');
-    } else {
-      showToast('Error assigning collection: ' + (result.error || 'Unknown error'), 'error');
+      div.querySelector('.btn-remove-side-row').onclick = () => div.remove();
     }
   });
 
-  ov.addEventListener('click', (ev) => { if (ev.target === ov) cleanup(false); });
+  cancelBtn.addEventListener('click', () => cleanup(false));
+  ov.addEventListener('click', (e) => { if (e.target === ov) cleanup(false); });
+
+  okBtn.addEventListener('click', async () => {
+    const date = dateInput.value;
+    if (!date) {
+      showToast('Please select a date', 'warning');
+      return;
+    }
+
+    okBtn.disabled = true;
+    okBtn.textContent = 'Assigning...';
+
+    try {
+      // Get active user
+      const activeUserRes = await api('getActiveUser', {});
+      const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
+
+      // Collect assignments per slot
+      const slots = ['Breakfast', 'Lunch', 'Dinner'];
+
+      for (const slot of slots) {
+        // 1. Assign Main Dish
+        const mainSel = card.querySelector(`.assign-main-select[data-slot="${slot}"]`);
+        const mainRid = mainSel ? mainSel.value : '';
+
+        if (mainRid) {
+          const r = recipes.find(x => x.RecipeId === mainRid);
+          await api('upsertUserPlanMeal', {
+            userId, date, slot,
+            meal: { RecipeId: mainRid, Title: r ? r.Title : 'Recipe' }
+          });
+        }
+
+        // 2. Assign Side Dishes
+        const sideSelects = card.querySelectorAll(`.assign-side-select[data-slot="${slot}"]`);
+        for (const sSel of sideSelects) {
+          const sideRid = sSel.value;
+          if (sideRid) {
+            const r = recipes.find(x => x.RecipeId === sideRid);
+            await api('addAdditionalItem', {
+              date, slot,
+              recipeId: sideRid,
+              title: r ? r.Title : 'Side Dish',
+              itemType: 'side'
+            });
+          }
+        }
+      }
+
+      // Switch to Meal Planner tab and reload
+      document.querySelector('[data-tab="planner"]').click();
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      const currentStart = PLAN.start || ymd(new Date());
+      const currentDays = PLAN.days || 7;
+      await loadPlansIntoUi(currentStart, currentDays);
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      const dayElement = document.querySelector(`#planList [data-day="${date}"]`);
+      if (dayElement) {
+        dayElement.open = true;
+        dayElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      cleanup(true);
+      showToast(`Collection items assigned to ${date}`, 'success');
+
+    } catch (err) {
+      console.error('Error assigning day:', err);
+      showToast('Error: ' + err.message, 'error');
+      okBtn.disabled = false;
+      okBtn.textContent = 'Assign to Day';
+    }
+  });
 }
 
 document.addEventListener('click', async (e) => {
@@ -3957,6 +4283,26 @@ document.addEventListener('click', async (e) => {
 
   const pe = e.target.closest('[data-action="planner-edit"],[data-action="edit-meal"]');
   if (pe) { const rid = pe.dataset.rid; if (rid) await openRecipeModalEdit(rid); return; }
+
+  // Planner: Mark meal as cooked (deduct ingredients from pantry)
+  const mc = e.target.closest('[data-action="mark-cooked"]');
+  if (mc) {
+    const rid = mc.dataset.rid;
+    if (rid) {
+      if (!confirm('Mark this meal as cooked? This will deduct ingredients from your pantry.')) return;
+      const res = await api('markMealCooked', { recipeId: rid });
+      if (res.ok) {
+        const msg = res.totalDeducted > 0
+          ? `Meal marked as cooked. ${res.totalDeducted} ingredient(s) deducted from pantry.`
+          : 'Meal marked as cooked. No pantry items were affected.';
+        showToast(msg, 'success', 3000);
+        await loadPantry();
+      } else {
+        showToast(res.error || 'Failed to mark meal as cooked', 'error');
+      }
+    }
+    return;
+  }
 
   const pp = e.target.closest('[data-action="planner-print"],[data-action="print-meal"]');
   if (pp) {
@@ -4004,13 +4350,24 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
-  // Additional Items: Add Side/Dessert button
+  // Additional Items: Add Side/Dessert button (list view and popover)
   const btnAdd = e.target.closest('.btn-add-additional,.btn-add-additional-main');
   if (btnAdd) {
     console.log('[Click Handler] Add Side/Dessert button clicked', btnAdd.dataset);
     const date = btnAdd.dataset.date;
     const slot = btnAdd.dataset.slot;
     console.log('[Click Handler] Calling showAddAdditionalItemModal with', date, slot);
+    await showAddAdditionalItemModal(date, slot);
+    return;
+  }
+
+  // Grid View: Add Side button (+ Side button in grid cells)
+  const btnAddSide = e.target.closest('[data-action="add-side-to-slot"],.grid-add-side-btn');
+  if (btnAddSide) {
+    e.stopPropagation();
+    console.log('[Click Handler] Grid Add Side button clicked', btnAddSide.dataset);
+    const date = btnAddSide.dataset.date;
+    const slot = btnAddSide.dataset.slot;
     await showAddAdditionalItemModal(date, slot);
     return;
   }
@@ -5159,19 +5516,28 @@ document.addEventListener('change', async (e) => {
       if (saved) boughtItems = JSON.parse(saved);
     } catch (_) { }
 
+    // Get item data from the DOM
+    const itemDiv = toggle.closest('[data-ingredient-norm]');
+    const ingredientNorm = itemDiv ? itemDiv.dataset.ingredientNorm : '';
+    const unit = itemDiv ? itemDiv.dataset.unit : '';
+    const qty = itemDiv ? parseFloat(itemDiv.dataset.qty) : 0;
+
     // Update bought status
     if (isChecked) {
       boughtItems[itemKey] = true;
+
+      // Add to pantry when purchased
+      if (ingredientNorm && qty > 0) {
+        const res = await api('markShoppingItemPurchased', { ingredientNorm, qty, unit: unit || '' });
+        if (res.ok) {
+          showToast(`${ingredientNorm} added to pantry`, 'success', 2000);
+        }
+      }
     } else {
       delete boughtItems[itemKey];
 
-      // If unchecking, add back to pantry
-      const itemDiv = toggle.closest('[data-ingredient-norm]');
+      // If unchecking, remove from pantry (return item)
       if (itemDiv) {
-        const ingredientNorm = itemDiv.dataset.ingredientNorm;
-        const unit = itemDiv.dataset.unit;
-        const qty = parseFloat(itemDiv.dataset.qty);
-
         if (ingredientNorm && qty > 0 && unit) {
           const res = await api('returnItemToPantry', { ingredientNorm, qty, unit });
           if (res.ok) {
@@ -6428,11 +6794,15 @@ function setupGridDragAndDrop() {
 
       if (!DRAG_SOURCE) return;
 
+      // Capture DRAG_SOURCE locally before any async operations
+      // (dragend fires and nullifies DRAG_SOURCE during async awaits)
+      const dragSource = { ...DRAG_SOURCE };
+
       const targetDate = slot.dataset.date;
       const targetSlot = slot.dataset.slot;
 
       // ========== PHASE 2.2: Handle recipe drops (assign) vs meal drops (swap) ==========
-      if (DRAG_SOURCE.type === 'recipe') {
+      if (dragSource.type === 'recipe') {
         // Phase 4.5.7: Get active user
         const activeUserRes = await api('getActiveUser');
         const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
@@ -6444,7 +6814,7 @@ function setupGridDragAndDrop() {
 
         // Recipe → Meal Slot: Assign recipe to slot
         // Fetch recipe title first
-        const recipeRes = await api('getRecipe', { recipeId: DRAG_SOURCE.recipeId });
+        const recipeRes = await api('getRecipe', { recipeId: dragSource.recipeId });
         if (!recipeRes.ok) {
           showToast('Failed to load recipe', 'error');
           return;
@@ -6455,26 +6825,26 @@ function setupGridDragAndDrop() {
           date: targetDate,
           slot: targetSlot,
           meal: {
-            RecipeId: DRAG_SOURCE.recipeId,
+            RecipeId: dragSource.recipeId,
             Title: recipeRes.recipe.Title
           }
         });
 
         if (res.ok) {
-          showToast(`"${DRAG_SOURCE.title}" assigned to ${targetSlot} on ${targetDate}`, 'success');
+          showToast(`"${dragSource.title}" assigned to ${targetSlot} on ${targetDate}`, 'success');
           await loadPlansIntoUi(PLAN.start, PLAN.days);
           if (PLAN.viewMode === 'grid') renderPlanGrid();
           await refreshDashboardIfToday(targetDate); // Refresh dashboard if today's meal changed
         } else {
           showToast(res.error || 'Failed to assign recipe', 'error');
         }
-      } else if (DRAG_SOURCE.type === 'meal') {
+      } else if (dragSource.type === 'meal') {
         // Meal → Meal Slot: Swap meals
-        if (DRAG_SOURCE.date === targetDate && DRAG_SOURCE.slot === targetSlot) return;
+        if (dragSource.date === targetDate && dragSource.slot === targetSlot) return;
 
         const res = await api('swapPlanMeals', {
-          date1: DRAG_SOURCE.date,
-          slot1: DRAG_SOURCE.slot,
+          date1: dragSource.date,
+          slot1: dragSource.slot,
           date2: targetDate,
           slot2: targetSlot
         });
@@ -6484,7 +6854,7 @@ function setupGridDragAndDrop() {
           if (PLAN.viewMode === 'grid') renderPlanGrid();
           // Refresh dashboard if either date involves today
           const today = ymd(new Date());
-          if (DRAG_SOURCE.date === today || targetDate === today) {
+          if (dragSource.date === today || targetDate === today) {
             QUERY_CACHE.plans.delete(today);
             QUERY_CACHE.plansFetchTime.delete(today);
             await renderDashboard();
@@ -6700,9 +7070,22 @@ function renderCollections() {
                   <button class="collection-card-action" data-action="export-collection" data-cid="${escapeAttr(c.CollectionId)}" style="background: rgba(34, 197, 94, 0.15); border-color: rgba(34, 197, 94, 0.3); color: #22c55e;">
                     📥 Export
                   </button>
-                  <button class="collection-card-action primary" data-action="assign-collection-to-week" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}">
-                    📅 Assign to Week
-                  </button>
+                  <div class="collection-assign-dropdown" style="position: relative; display: inline-block;">
+                    <button class="collection-card-action primary collection-assign-btn" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}">
+                      📅 Assign ▾
+                    </button>
+                    <div class="collection-assign-menu" style="display:none; position:absolute; top:100%; left:0; background:var(--card); border:1px solid var(--line); border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:180px; margin-top:4px;">
+                      <button class="collection-assign-option" data-action="assign-collection-to-planner" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}" style="display:block; width:100%; padding:10px 14px; border:none; background:none; text-align:left; cursor:pointer; color:var(--text); font-size:13px;">
+                        🍽️ Assign to Meal
+                      </button>
+                      <button class="collection-assign-option" data-action="assign-collection-to-day" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}" style="display:block; width:100%; padding:10px 14px; border:none; background:none; text-align:left; cursor:pointer; color:var(--text); font-size:13px; border-top:1px solid var(--line);">
+                        📆 Assign to Day
+                      </button>
+                      <button class="collection-assign-option" data-action="assign-collection-to-week" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}" style="display:block; width:100%; padding:10px 14px; border:none; background:none; text-align:left; cursor:pointer; color:var(--text); font-size:13px; border-top:1px solid var(--line);">
+                        📅 Assign to Week
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -6725,7 +7108,20 @@ function renderCollections() {
               <button class="ghost" data-action="edit-collection" data-cid="${escapeAttr(c.CollectionId)}">Edit</button>
               <button class="ghost" data-action="assign-recipes" data-cid="${escapeAttr(c.CollectionId)}">Assign Recipes</button>
               <button class="ghost" data-action="export-collection" data-cid="${escapeAttr(c.CollectionId)}" style="background: rgba(34, 197, 94, 0.15); border-color: rgba(34, 197, 94, 0.3); color: #22c55e;">📥 Export</button>
-              <button class="primary" data-action="assign-collection-to-planner" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">📅 Assign to Meal Plan</button>
+              <div class="collection-assign-dropdown" style="position: relative; display: inline-block;">
+                <button class="primary collection-assign-btn" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">📅 Assign ▾</button>
+                <div class="collection-assign-menu" style="display:none; position:absolute; top:100%; right:0; background:var(--card); border:1px solid var(--line); border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:180px; margin-top:4px;">
+                  <button class="collection-assign-option" data-action="assign-collection-to-planner" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}" style="display:block; width:100%; padding:10px 14px; border:none; background:none; text-align:left; cursor:pointer; color:var(--text); font-size:13px;">
+                    🍽️ Assign to Meal
+                  </button>
+                  <button class="collection-assign-option" data-action="assign-collection-to-day" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}" style="display:block; width:100%; padding:10px 14px; border:none; background:none; text-align:left; cursor:pointer; color:var(--text); font-size:13px; border-top:1px solid var(--line);">
+                    📆 Assign to Day
+                  </button>
+                  <button class="collection-assign-option" data-action="assign-collection-to-week" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}" style="display:block; width:100%; padding:10px 14px; border:none; background:none; text-align:left; cursor:pointer; color:var(--text); font-size:13px; border-top:1px solid var(--line);">
+                    📅 Assign to Week
+                  </button>
+                </div>
+              </div>
               <button class="primary" data-action="collection-shopping-list" data-cid="${escapeAttr(c.CollectionId)}" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">🛒 Shopping List</button>
             </div>
           </div>
@@ -6825,14 +7221,17 @@ function renderCollectionRecipes() {
         <div class="item">
           <div style="display:flex; justify-content:space-between; gap:10px; align-items:start;">
             <div style="display:flex; align-items:center; gap:12px; flex:1;">
-              <label style="display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none;">
-                <input type="checkbox" 
-                       ${r.IsMainDish ? 'checked' : ''} 
+              <div style="display:flex; flex-direction:column; gap:2px;">
+                <label style="font-size:11px; color:var(--muted); font-weight:600;">Meal Role</label>
+                <select 
+                       class="collection-role-select"
                        data-action="toggle-main-dish" 
                        data-rid="${escapeAttr(r.RecipeId)}"
-                       style="width:18px; height:18px; cursor:pointer;">
-                <span style="font-size:13px; color:#6b7280;">Main Dish</span>
-              </label>
+                       style="padding:4px 8px; border-radius:6px; border:1px solid var(--line); font-size:12px; background:var(--card); color:var(--text); cursor:pointer;">
+                  <option value="1" ${r.IsMainDish ? 'selected' : ''}>Main Dish</option>
+                  <option value="0" ${!r.IsMainDish ? 'selected' : ''}>Side Dish</option>
+                </select>
+              </div>
               <div style="flex:1;">
                 <strong>${escapeHtml(r.Title)}</strong>
                 <div class="muted">${escapeHtml(r.MealType || 'Any')} • ${escapeHtml(r.Cuisine || '')}</div>
@@ -8464,7 +8863,8 @@ function bindUi() {
   // Apply filters button
   safeBind('applyFilters', 'click', async () => {
     await resetAndLoadRecipes();
-    showToast(`Filters applied - ${RECIPES.length} recipes match`, 'success');
+    const filteredCount = VIRTUAL_SCROLL.totalItems || VIRTUAL_SCROLL.filteredRecipes?.length || 0;
+    showToast(`Filters applied - ${filteredCount} recipe${filteredCount === 1 ? '' : 's'} match`, 'success');
   });
 
   // Jump A-Z functionality
@@ -9911,6 +10311,25 @@ function bindUi() {
     renderAssignRecipesList(e.target.value.trim().toLowerCase());
   }, 300));
 
+  // ========== PHASE 2.5: Collection Main Dish Toggle ==========
+  document.getElementById('collectionsList').addEventListener('change', async (e) => {
+    if (e.target.classList.contains('collection-role-select')) {
+      const rid = e.target.dataset.rid;
+      const isMain = e.target.value === '1';
+      console.log('[Collection] Setting recipe', rid, 'isMain:', isMain);
+
+      await api('setMainDishInCollection', {
+        collectionId: CURRENT_COLLECTION_ID,
+        recipeId: rid,
+        isMain: isMain
+      });
+
+      // Refresh valid main dish state
+      // Re-render to show updated state (e.g. if we enforce only 1 main)
+      // For now, simpler to just let it save.
+    }
+  });
+
   document.getElementById('assignRecipesModalBack').addEventListener('click', async (e) => {
     const toggle = e.target.closest('[data-action="toggle-recipe-in-collection"]');
     if (toggle) {
@@ -9938,6 +10357,24 @@ function bindUi() {
   });
 
   document.getElementById('collectionsList').addEventListener('click', async (e) => {
+    // Toggle dropdown menu for assign button
+    const assignBtn = e.target.closest('.collection-assign-btn');
+    if (assignBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('[Collection Dropdown] Assign button clicked (Global Portal)');
+      const cid = assignBtn.dataset.cid;
+      const cname = assignBtn.dataset.cname;
+
+      // Use new global portal function
+      if (typeof openGlobalCollectionDropdown === 'function') {
+        openGlobalCollectionDropdown(assignBtn, cid, cname);
+      } else {
+        console.error('openGlobalCollectionDropdown not found!');
+      }
+      return;
+    }
+
     const edit = e.target.closest('[data-action="edit-collection"]');
     if (edit) {
       const collectionId = edit.dataset.cid;
@@ -9966,7 +10403,19 @@ function bindUi() {
     if (assignToPlanner) {
       const collectionId = assignToPlanner.dataset.cid;
       const collectionName = assignToPlanner.dataset.cname;
+      // Close dropdown menu
+      document.querySelectorAll('.collection-assign-menu').forEach(m => m.style.display = 'none');
       await showAssignCollectionFromCollectionsTab(collectionId, collectionName);
+      return;
+    }
+
+    const assignToDay = e.target.closest('[data-action="assign-collection-to-day"]');
+    if (assignToDay) {
+      const collectionId = assignToDay.dataset.cid;
+      const collectionName = assignToDay.dataset.cname;
+      // Close dropdown menu
+      document.querySelectorAll('.collection-assign-menu').forEach(m => m.style.display = 'none');
+      await showAssignCollectionToDayModal(collectionId, collectionName);
       return;
     }
   });
@@ -10003,8 +10452,17 @@ function bindUi() {
     if (assignToWeek) {
       const collectionId = assignToWeek.dataset.cid;
       const collectionName = assignToWeek.dataset.cname;
+      // Close dropdown menu
+      document.querySelectorAll('.collection-assign-menu').forEach(m => m.style.display = 'none');
       await showAssignCollectionToWeekModal(collectionId, collectionName);
       return;
+    }
+  });
+
+  // Close collection assign dropdowns when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.collection-assign-dropdown')) {
+      document.querySelectorAll('.collection-assign-menu').forEach(m => m.style.display = 'none');
     }
   });
 
@@ -14773,3 +15231,150 @@ const debouncedPantrySearch = debounce((el, idx) => {
 
 // Call init() to start the application
 init();
+/* ============= PHASE 9: GLOBAL UI PORTALS (Fixed Z-Index) ============= */
+
+// Global Tooltip System
+function initGlobalTooltips() {
+  let tooltip = document.getElementById('global-tooltip');
+  if (!tooltip) {
+    tooltip = document.createElement('div');
+    tooltip.id = 'global-tooltip';
+    tooltip.className = 'global-tooltip';
+    document.body.appendChild(tooltip);
+  }
+
+  const show = (e) => {
+    const target = e.target.closest('[data-tooltip]');
+    if (!target) return;
+
+    const text = target.getAttribute('data-tooltip');
+    if (!text) return;
+
+    tooltip.textContent = text;
+    tooltip.style.display = 'block';
+
+    const rect = target.getBoundingClientRect();
+    const pos = target.getAttribute('data-tooltip-pos') || 'top';
+    const tooltipRect = tooltip.getBoundingClientRect();
+
+    let top, left;
+
+    if (pos === 'bottom') {
+      top = rect.bottom + 8;
+      left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
+    } else if (pos === 'left') {
+      top = rect.top + (rect.height / 2) - (tooltipRect.height / 2);
+      left = rect.left - tooltipRect.width - 8;
+    } else {
+      // Default top
+      top = rect.top - tooltipRect.height - 8;
+      left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
+    }
+
+    // Boundary check
+    if (left < 4) left = 4;
+    if (left + tooltipRect.width > window.innerWidth - 4) left = window.innerWidth - tooltipRect.width - 4;
+    if (top < 4) top = 4;
+
+    tooltip.style.top = `${top}px`;
+    tooltip.style.left = `${left}px`;
+  };
+
+  const hide = () => {
+    tooltip.style.display = 'none';
+  };
+
+  document.addEventListener('mouseover', show);
+  document.addEventListener('mouseout', (e) => {
+    const target = e.target.closest('[data-tooltip]');
+    if (target) hide();
+  });
+}
+
+// Global Dropdown System (Portal)
+function openGlobalCollectionDropdown(btn, cid, cname) {
+  // Close existing dropdowns
+  document.querySelectorAll('.global-dropdown-menu').forEach(e => e.remove());
+
+  const menu = document.createElement('div');
+  menu.className = 'global-dropdown-menu';
+  menu.setAttribute('data-dropdown-open', 'true');
+
+  const options = [
+    { label: '🍽️ Assign to Meal', action: 'planner' },
+    { label: '📆 Assign to Day', action: 'day' },
+    { label: '📅 Assign to Week', action: 'week' }
+  ];
+
+  options.forEach(opt => {
+    const b = document.createElement('button');
+    b.className = 'global-dropdown-option';
+    b.textContent = opt.label;
+    b.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      menu.remove();
+      try {
+        if (opt.action === 'planner') {
+          await showAssignCollectionFromCollectionsTab(cid, cname);
+        } else if (opt.action === 'day') {
+          await showAssignCollectionToDayModal(cid, cname);
+        } else if (opt.action === 'week') {
+          await showAssignCollectionToWeekModal(cid, cname);
+        }
+      } catch (err) {
+        console.error('Dropdown action error:', err);
+        showToast('Error: ' + err.message, 'error');
+      }
+    };
+    menu.appendChild(b);
+  });
+
+  document.body.appendChild(menu);
+
+  // Position the menu
+  const rect = btn.getBoundingClientRect();
+  const menuHeight = menu.offsetHeight || 150;
+  const menuWidth = menu.offsetWidth || 180;
+
+  // Check if menu would go off bottom of screen
+  let top = rect.bottom + 4;
+  if (top + menuHeight > window.innerHeight) {
+    top = rect.top - menuHeight - 4;
+  }
+
+  // Check if menu would go off right of screen  
+  let left = rect.left;
+  if (left + menuWidth > window.innerWidth) {
+    left = window.innerWidth - menuWidth - 8;
+  }
+
+  menu.style.top = `${top}px`;
+  menu.style.left = `${left}px`;
+
+  // Close on outside click - use requestAnimationFrame to delay listener
+  // This prevents the same click from immediately closing the dropdown
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const closer = (e) => {
+        if (!menu.contains(e.target) && !btn.contains(e.target)) {
+          menu.remove();
+          document.removeEventListener('click', closer, true);
+          document.removeEventListener('keydown', escHandler);
+        }
+      };
+      const escHandler = (e) => {
+        if (e.key === 'Escape') {
+          menu.remove();
+          document.removeEventListener('click', closer, true);
+          document.removeEventListener('keydown', escHandler);
+        }
+      };
+      document.addEventListener('click', closer, true);
+      document.addEventListener('keydown', escHandler);
+    });
+  });
+}
+
+// Init Tooltips
+initGlobalTooltips();

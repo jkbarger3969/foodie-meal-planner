@@ -841,6 +841,7 @@ async function handleApiCall({ fn, payload, store }) {
       case 'deleteUserPlanMeal': return deleteUserPlanMeal(payload);
 
       case 'buildShoppingList': return buildShoppingList(payload);
+      case 'markMealCooked': return markMealCooked(payload);
 
       // Shopping list: assign/reassign store for items in the selected plan range
       case 'assignShoppingItemStore': return assignShoppingItemStore(payload);
@@ -898,6 +899,7 @@ async function handleApiCall({ fn, payload, store }) {
       case 'getAdditionalItems': return getAdditionalItems(payload);
       case 'getAdditionalItemsRange': return getAdditionalItemsRange(payload);
       case 'assignCollectionToSlot': return assignCollectionToSlot(payload);
+      case 'getCollectionRecipes': return getCollectionRecipes(payload);
 
       // Multi-User Support API (Phase 4.5)
       case 'listUsers': return listUsers();
@@ -2553,73 +2555,129 @@ function buildShoppingList(payload) {
     });
   }
 
-  const groups = Object.values(storeGroups);
+  let groups = Object.values(storeGroups);
 
-  // NEW: Auto-deduct from pantry and track warnings
+  // Pantry subtraction: Track warnings and apply deductions
   const pantryWarnings = [];
   const pantryDeductions = [];
 
+  // Load pantry items for matching
+  const hasQtyNum = pantryHasCol_('QtyNum');
+  const hasUnit = pantryHasCol_('Unit');
+  
+  // Build a map of pantry items for fast lookup
+  const pantryMap = new Map();
+  try {
+    const cols = ['ItemId', 'Name', 'NameLower', 'QtyText'];
+    if (hasQtyNum) cols.push('QtyNum');
+    if (hasUnit) cols.push('Unit');
+    
+    const pantryRows = db().prepare(`SELECT ${cols.join(', ')} FROM pantry`).all();
+    for (const row of pantryRows) {
+      const key = normLower_(row.NameLower || row.Name);
+      if (!pantryMap.has(key)) {
+        pantryMap.set(key, []);
+      }
+      pantryMap.get(key).push(row);
+    }
+  } catch (e) {
+    console.log('[buildShoppingList] Could not load pantry:', e.message);
+  }
+
+  // Process each item and subtract from pantry
   for (const group of groups) {
+    const filteredItems = [];
+    
     for (const item of group.Items) {
       const ingredientLower = normLower_(item.IngredientNorm);
       const requiredQty = item.QtyNum;
       const unit = canonicalUnit(item.Unit);
 
-      if (!ingredientLower || !requiredQty || !Number.isFinite(requiredQty) || requiredQty <= 0 || !unit) {
-        continue;
-      }
+      // Check if this ingredient exists in pantry
+      const pantryEntries = pantryMap.get(ingredientLower) || [];
+      let totalPantryQty = 0;
+      let pantryUnit = unit;
 
-      // Try to deduct from pantry
-      const deducted = _deductFromPantry_(ingredientLower, requiredQty, unit);
-
-      if (deducted > 0) {
-        pantryDeductions.push({
-          ingredient: ingredientLower,
-          deducted: deducted,
-          unit: unit,
-          originalQty: requiredQty
-        });
-
-        // Update the shopping list item to show NET amount needed
-        const netQty = requiredQty - deducted;
-        if (netQty <= 0) {
-          // Fully covered by pantry - mark item
-          item.QtyNum = 0;
-          item.QtyText = '✓ From Pantry';
-          item.FromPantry = true;
-        } else {
-          // Partially covered
-          item.QtyNum = netQty;
-          item.QtyText = `${netQty} ${unit} (${deducted} from pantry)`;
-          item.PartialPantry = true;
+      for (const pEntry of pantryEntries) {
+        const pQty = pantryQtyFromRow_(pEntry);
+        if (pQty.qtyNum !== null && Number.isFinite(pQty.qtyNum) && pQty.qtyNum > 0 && pQty.unit) {
+          // Convert to same unit if possible
+          const converted = convertQty_(pQty.qtyNum, pQty.unit, unit);
+          if (converted.ok && Number.isFinite(converted.qty)) {
+            totalPantryQty += converted.qty;
+            pantryUnit = unit;
+          } else if (!unit) {
+            // If no unit specified, use pantry's unit
+            totalPantryQty += pQty.qtyNum;
+            pantryUnit = pQty.unit;
+          }
         }
       }
+
+      // Calculate net needed
+      if (requiredQty !== null && Number.isFinite(requiredQty) && requiredQty > 0 && totalPantryQty > 0) {
+        const netNeeded = requiredQty - totalPantryQty;
+        
+        if (netNeeded <= 0) {
+          // Fully covered by pantry - SKIP this item
+          pantryDeductions.push({
+            ingredient: item.IngredientNorm,
+            deducted: requiredQty,
+            unit: unit || pantryUnit,
+            originalQty: requiredQty,
+            status: 'fully_covered'
+          });
+          continue; // Don't add to filtered items
+        } else {
+          // Partially covered - update quantity
+          item.QtyNum = netNeeded;
+          item.QtyText = `${netNeeded}${unit ? ' ' + unit : ''} (${totalPantryQty} in pantry)`;
+          item.PartialPantry = true;
+          pantryDeductions.push({
+            ingredient: item.IngredientNorm,
+            deducted: totalPantryQty,
+            unit: unit || pantryUnit,
+            originalQty: requiredQty,
+            status: 'partial'
+          });
+        }
+      }
+      
+      filteredItems.push(item);
     }
+    
+    group.Items = filteredItems;
   }
 
-  // Check for low stock warnings AFTER deductions
-  const hasQtyNum = pantryHasCol_('QtyNum');
+  // Remove empty groups
+  groups = groups.filter(g => g.Items.length > 0);
+
+  // Check for low stock warnings
   const hasLowStockThreshold = pantryHasCol_('low_stock_threshold');
 
   if (hasQtyNum && hasLowStockThreshold) {
-    const lowStockRows = db().prepare(`
-      SELECT Name, QtyNum, low_stock_threshold, Unit
-      FROM pantry
-      WHERE low_stock_threshold IS NOT NULL 
-        AND low_stock_threshold > 0
-        AND QtyNum IS NOT NULL 
-        AND QtyNum <= low_stock_threshold
-      ORDER BY Name ASC
-    `).all();
+    try {
+      const lowStockRows = db().prepare(`
+        SELECT Name, QtyNum, low_stock_threshold, Unit
+        FROM pantry
+        WHERE low_stock_threshold IS NOT NULL 
+          AND low_stock_threshold > 0
+          AND QtyNum IS NOT NULL 
+          AND QtyNum <= low_stock_threshold
+        ORDER BY Name ASC
+      `).all();
 
-    for (const row of lowStockRows) {
-      pantryWarnings.push({
-        name: row.Name,
-        current: row.QtyNum,
-        threshold: row.low_stock_threshold,
-        unit: row.Unit || '',
-        message: `${row.Name}: ${row.QtyNum} ${row.Unit || ''} (threshold: ${row.low_stock_threshold})`
-      });
+      for (const row of lowStockRows) {
+        pantryWarnings.push({
+          name: row.Name,
+          current: row.QtyNum,
+          threshold: row.low_stock_threshold,
+          unit: row.Unit || '',
+          message: `${row.Name}: ${row.QtyNum} ${row.Unit || ''} (threshold: ${row.low_stock_threshold})`
+        });
+      }
+    } catch (e) {
+      console.log('[buildShoppingList] Could not check low stock:', e.message);
     }
   }
 
@@ -2682,28 +2740,79 @@ function returnItemToPantry(payload) {
   });
 }
 
-// Mark shopping list item as purchased (for companion app sync)
+// Mark shopping list item as purchased and add to pantry
 function markShoppingItemPurchased(payload) {
   const ingredientNorm = String(payload && payload.ingredientNorm || '').trim().toLowerCase();
-  const purchased = Boolean(payload && payload.purchased);
+  const qty = Number(payload && payload.qty) || 0;
+  const unit = String(payload && payload.unit || '').trim();
 
   if (!ingredientNorm) {
     return err_('ingredientNorm required.');
   }
 
-  // If marking as NOT purchased, we need to add back to pantry
-  if (!purchased && payload.qty && payload.unit) {
-    const qty = Number(payload.qty);
-    const unit = String(payload.unit).trim();
-    if (qty > 0 && unit) {
-      _addBackToPantry_(ingredientNorm, qty, canonicalUnit(unit));
-    }
+  // Add purchased item to pantry
+  if (qty > 0) {
+    _addBackToPantry_(ingredientNorm, qty, canonicalUnit(unit) || unit);
   }
 
   return ok_({
     ingredient: ingredientNorm,
-    purchased,
-    pantryRestored: !purchased
+    purchased: true,
+    pantryUpdated: qty > 0
+  });
+}
+
+// Mark a meal as cooked and deduct ingredients from pantry
+function markMealCooked(payload) {
+  const recipeId = String(payload && payload.recipeId || '').trim();
+  if (!recipeId) {
+    return err_('recipeId is required.');
+  }
+
+  // Get all ingredients for this recipe
+  const ingredients = db().prepare(`
+    SELECT IngredientNorm, QtyNum, Unit 
+    FROM recipe_ingredients 
+    WHERE RecipeId = ?
+  `).all(recipeId);
+
+  if (!ingredients || ingredients.length === 0) {
+    return ok_({ message: 'No ingredients found for this recipe', deducted: [] });
+  }
+
+  const deducted = [];
+  const skipped = [];
+
+  for (const ing of ingredients) {
+    const ingredientNorm = normLower_(ing.IngredientNorm);
+    const qtyNum = Number(ing.QtyNum);
+    const unit = canonicalUnit(ing.Unit);
+
+    if (!ingredientNorm || !Number.isFinite(qtyNum) || qtyNum <= 0) {
+      skipped.push({ ingredient: ingredientNorm, reason: 'invalid quantity' });
+      continue;
+    }
+
+    // Deduct from pantry (only if pantry item exists)
+    const deductedAmount = _deductFromPantry_(ingredientNorm, qtyNum, unit || 'piece');
+    
+    if (deductedAmount > 0) {
+      deducted.push({
+        ingredient: ingredientNorm,
+        quantity: deductedAmount,
+        unit: unit || 'piece'
+      });
+    } else {
+      skipped.push({ ingredient: ingredientNorm, reason: 'not in pantry or insufficient' });
+    }
+  }
+
+  return ok_({
+    recipeId,
+    deducted,
+    skipped,
+    totalDeducted: deducted.length,
+    totalSkipped: skipped.length
   });
 }
 
@@ -3723,6 +3832,23 @@ function getAdditionalItems(payload) {
   `).all(d, s);
 
   return ok_({ items });
+}
+
+function getCollectionRecipes(payload) {
+  const collectionId = payload && payload.collectionId;
+  const cid = String(collectionId || '').trim();
+
+  if (!cid) return err_('Missing collectionId');
+
+  const recipes = db().prepare(`
+    SELECT r.RecipeId, r.Title, m.is_main_dish
+    FROM recipes r
+    INNER JOIN recipe_collection_map m ON r.RecipeId = m.recipe_id
+    WHERE m.collection_id = ?
+    ORDER BY m.is_main_dish DESC, r.Title ASC
+  `).all(cid);
+
+  return ok_({ recipes });
 }
 
 function assignCollectionToSlot(payload) {

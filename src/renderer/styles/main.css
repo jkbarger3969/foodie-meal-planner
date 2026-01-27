@@ -52,6 +52,9 @@
       --line-strong: rgba(255, 255, 255, 0.2);
       --line-focus: rgba(245, 158, 11, 0.4);
 
+      /* Utility */
+      --bg-darker: rgba(0, 0, 0, 0.3);
+
       /* Legacy compatibility */
       --muted: #94a3b8;
     }
@@ -144,6 +147,7 @@
       backdrop-filter: var(--glass-blur);
       z-index: 100;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+      overflow: visible;
     }
 
     h1 {
@@ -234,7 +238,7 @@
       padding: 24px;
       box-shadow: var(--card-shadow);
       backdrop-filter: var(--glass-blur);
-      overflow: hidden;
+      overflow: visible;
     }
 
     .recipe-grid {
@@ -534,6 +538,7 @@
       gap: 8px;
       flex-wrap: wrap;
       align-items: center;
+      overflow: visible;
     }
 
     button {
@@ -579,6 +584,8 @@
     button.ghost {
       background: rgba(255, 255, 255, 0.04);
       border-color: var(--line);
+      overflow: visible;
+      /* Ensure tooltips can display outside */
     }
 
     button.ghost:hover:not(:disabled) {
@@ -621,6 +628,8 @@
       border: 1px solid var(--line);
       background: var(--bg-elevated);
       transition: all 0.2s ease;
+      overflow: visible;
+      /* Allow dropdowns to overflow */
     }
 
     .item:hover {
@@ -1689,7 +1698,7 @@
       bottom: 204px;
       left: 24px;
       width: 320px;
-      background: var(--card);
+      background: #111827;
       border: 1px solid var(--line);
       border-radius: 16px;
       padding: 16px;
@@ -2710,13 +2719,18 @@
       pointer-events: none;
       transition: opacity 0.2s ease;
       z-index: 10001;
+      pointer-events: none;
+      /* Ensure clicks pass through */
     }
 
+    /* Tooltip hover states - DISABLED in favor of JS global tooltips to prevent clipping */
+    /*
     [data-tooltip]:hover::before,
     [data-tooltip]:hover::after {
       opacity: 1;
       transform: translateX(-50%) translateY(0);
     }
+    */
 
     /* Tooltip positions */
     [data-tooltip-pos="top"]::before {
@@ -3543,6 +3557,7 @@
       display: flex;
       gap: 6px;
       flex-wrap: wrap;
+      overflow: visible !important;
     }
 
     .collection-card-action {
@@ -3575,6 +3590,38 @@
     .collection-card-action.primary:hover {
       background: #3d8fef;
     }
+
+    /* Collection assign dropdown */
+    .collection-assign-dropdown {
+      position: relative;
+      display: inline-block;
+    }
+
+    .collection-assign-menu {
+      animation: dropdownFadeIn 0.15s ease-out;
+      z-index: 10002 !important;
+    }
+
+    .collection-assign-menu[style*="block"] {
+      display: block !important;
+    }
+
+    @keyframes dropdownFadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(-4px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .collection-assign-option:hover {
+      background: rgba(255, 255, 255, 0.1) !important;
+    }
+
 
     /* View toggle buttons */
     .view-toggle {
@@ -3702,7 +3749,7 @@
       left: 24px;
       width: 360px;
       max-height: 500px;
-      background: var(--card);
+      background: #111827;
       border: 1px solid var(--line);
       border-radius: 16px;
       padding: 16px;
@@ -5499,20 +5546,17 @@
     }
 
     .planner-day-card {
-      background: var(--glass-bg);
+      background: var(--card);
       backdrop-filter: var(--glass-blur);
       border: 1px solid var(--glass-border);
-      border-radius: 24px;
+      border-radius: 16px;
       padding: 0;
       overflow: hidden;
-      transition: all 0.3s ease;
       box-shadow: var(--card-shadow);
     }
 
     .planner-day-card:hover {
-      transform: translateY(-4px);
-      border-color: rgba(255, 255, 255, 0.15);
-      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.2);
     }
 
     .planner-day-header {
@@ -5522,6 +5566,25 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
+    }
+
+    /* Clear day button in header */
+    .planner-day-header .card-action-btn {
+      width: 28px;
+      height: 28px;
+      font-size: 14px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: var(--muted);
+      opacity: 0.6;
+      transition: all 0.2s ease;
+    }
+
+    .planner-day-header .card-action-btn:hover {
+      opacity: 1;
+      background: rgba(239, 68, 68, 0.2);
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #ef4444;
     }
 
     .planner-day-title {
@@ -5538,12 +5601,11 @@
     }
 
     .planner-slot {
-      padding: 16px 20px;
+      padding: 12px 16px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      position: relative;
     }
 
-    .planner-slot:last-child {
+    .planner-slot:last-of-type {
       border-bottom: none;
     }
 
@@ -5574,27 +5636,28 @@
 
     .meal-line {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
-      gap: 12px;
-      padding: 8px 12px;
-      border-radius: 12px;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
       background: rgba(255, 255, 255, 0.02);
-      margin-bottom: 8px;
-      transition: all 0.2s ease;
+      margin-bottom: 4px;
       cursor: pointer;
-      position: relative;
     }
 
     .meal-line:hover {
-      background: rgba(255, 255, 255, 0.08);
-      transform: translateX(4px);
+      background: rgba(255, 255, 255, 0.06);
     }
 
     .meal-title {
-      flex: 1;
+      flex: 1 1 auto;
+      min-width: 120px;
       font-size: 14px;
-      font-weight: 600;
+      font-weight: 500;
       color: var(--text);
+      word-wrap: break-word;
+      line-height: 1.3;
     }
 
     .meal-badge {
@@ -5622,18 +5685,227 @@
     .meal-actions {
       display: flex;
       gap: 4px;
-      opacity: 0;
+      opacity: 1;
+      /* Always visible */
+    }
+
+    /* .meal-line:hover .meal-actions { opacity: 1; } - Removed as it's now redundant */
+
+    .meal-line .card-action-btn {
+      width: 24px;
+      height: 24px;
+      font-size: 12px;
+    }
+
+    /* ========== SIDE DISH / ADDITIONAL ITEMS STYLING ========== */
+    .additional-items-container {
+      flex-basis: 100%;
+      width: 100%;
+      margin-top: 4px;
+      padding-left: 0;
+    }
+
+    .additional-items {
+      margin-top: 0;
+    }
+
+    .meal-assignment-badge-container {
+      flex-shrink: 0;
+    }
+
+    /* Side dish details - collapsible section in list view */
+    .side-dish-details {
+      background: rgba(77, 163, 255, 0.08);
+      border: 1px solid rgba(77, 163, 255, 0.2);
+      border-radius: 6px;
+    }
+
+    .side-dish-details summary {
+      padding: 8px 10px;
+      cursor: pointer;
+      font-size: 11px;
+      color: var(--text-secondary);
+      font-weight: 600;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      user-select: none;
+    }
+
+    .side-dish-details summary:hover {
+      background: rgba(77, 163, 255, 0.12);
+    }
+
+    .side-dish-details[open] summary {
+      border-bottom: 1px solid rgba(77, 163, 255, 0.15);
+    }
+
+    /* Hide native marker for side-dish-details */
+    .side-dish-details summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .side-dish-details summary::marker {
+      display: none;
+    }
+
+    /* Override global summary:before for side-dish-details - use single arrow */
+    .side-dish-details summary:before {
+      content: "▶";
+      display: inline-block;
+      font-size: 10px;
+      color: var(--accent);
+      transition: transform 0.2s ease;
+      margin-right: 6px;
+    }
+
+    .side-dish-details[open] summary:before {
+      content: "▶";
+      transform: rotate(90deg);
+    }
+
+    /* Content area inside the expanded details */
+    .side-dish-details>div {
+      padding: 8px 10px;
+    }
+
+    /* Additional items list inside details */
+    .additional-items-list {
+      padding: 0;
+    }
+
+    .additional-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(77, 163, 255, 0.08);
+    }
+
+    .additional-item:last-child {
+      border-bottom: none;
+    }
+
+    .item-type-badge {
+      background: var(--accent);
+      color: white;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 9px;
+      text-transform: uppercase;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .item-title {
+      flex: 1;
+      font-size: 12px;
+      color: var(--text);
+      font-weight: 500;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .btn-add-additional {
+      padding: 4px 10px;
+      background: rgba(77, 163, 255, 0.1);
+      color: var(--accent);
+      border: 1px solid rgba(77, 163, 255, 0.2);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 500;
+      transition: all 0.2s ease;
+    }
+
+    .btn-add-additional:hover {
+      background: rgba(77, 163, 255, 0.25);
+      border-color: rgba(77, 163, 255, 0.5);
+    }
+
+    /* Add margin when inside details expanded content */
+    .side-dish-details .btn-add-additional {
+      margin-top: 10px;
+    }
+
+    .btn-remove-additional {
+      background: none;
+      border: none;
+      color: var(--danger);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 4px 8px;
+      opacity: 0.7;
       transition: opacity 0.2s ease;
     }
 
-    .meal-line:hover .meal-actions {
+    .btn-remove-additional:hover {
       opacity: 1;
     }
 
-    .meal-line .card-action-btn {
-      width: 28px;
-      height: 28px;
+    /* Grid view additional items styling */
+    .grid-additional-badge {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background: var(--accent);
+      color: white;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 10px;
+      font-weight: 600;
+    }
+
+    .grid-expand-btn {
+      position: absolute;
+      bottom: 4px;
+      right: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      border: none;
+      cursor: pointer;
+      font-size: 12px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--muted);
+      transition: all 0.2s ease;
+    }
+
+    .grid-expand-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+      color: var(--text);
+    }
+
+    .grid-additional-popover {
+      position: absolute;
+      background: var(--card-elevated);
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      padding: 16px;
+      min-width: 250px;
+      max-width: 350px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      z-index: 10000;
+    }
+
+    .grid-additional-popover h4 {
+      margin: 0 0 12px 0;
       font-size: 14px;
+      color: var(--text);
+    }
+
+    .popover-item {
+      padding: 8px 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .popover-item:last-child {
+      border-bottom: none;
     }
 
     /* Swap actions */
@@ -6102,4 +6374,83 @@
       #companionFloatBtn {
         display: none;
       }
+    }
+
+    /* ============= PHASE 9: GLOBAL UI PORTALS (Fixed Z-Index) ============= */
+    .global-tooltip {
+      position: fixed;
+      padding: 12px 16px;
+      background: #111827;
+      /* Solid dark background like companion panel */
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      font-size: 13px;
+      pointer-events: none;
+      z-index: 100000;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+      display: none;
+      max-width: 300px;
+      white-space: nowrap;
+      backdrop-filter: blur(12px);
+      /* Glass effect if supported/transparent */
+    }
+
+    .global-dropdown-menu {
+      position: fixed;
+      background: var(--card-elevated);
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      padding: 6px;
+      min-width: 180px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      z-index: 10001;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      backdrop-filter: var(--glass-blur);
+    }
+
+    .modal-card {
+      background: var(--card-elevated);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+      backdrop-filter: var(--glass-blur);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .modal-card h3 {
+      color: var(--text);
+    }
+
+    .modal-card label {
+      color: var(--text-secondary);
+    }
+
+    .modal-card input,
+    .modal-card select {
+      background: var(--bg-darker);
+      border: 1px solid var(--line);
+      color: var(--text);
+    }
+
+    .global-dropdown-option {
+      display: block;
+      width: 100%;
+      padding: 10px 14px;
+      border: none;
+      background: none;
+      text-align: left;
+      cursor: pointer;
+      color: var(--text);
+      font-size: 13px;
+      transition: background 0.2s;
+    }
+
+    .global-dropdown-option:hover {
+      background: rgba(255, 255, 255, 0.1);
     }
