@@ -54,6 +54,10 @@
 
       /* Utility */
       --bg-darker: rgba(0, 0, 0, 0.3);
+      --overlay: rgba(0, 0, 0, 0.6);
+      --overlay-light: rgba(0, 0, 0, 0.4);
+      --fg: #f1f5f9;
+      --line-subtle: rgba(255, 255, 255, 0.05);
 
       /* Legacy compatibility */
       --muted: #94a3b8;
@@ -86,6 +90,11 @@
       --line: rgba(0, 0, 0, 0.08);
       --line-strong: rgba(0, 0, 0, 0.15);
       --line-focus: rgba(217, 119, 6, 0.4);
+      --line-subtle: rgba(0, 0, 0, 0.03);
+
+      --overlay: rgba(0, 0, 0, 0.4);
+      --overlay-light: rgba(0, 0, 0, 0.2);
+      --fg: #1e293b;
 
       --muted: #64748b;
     }
@@ -144,6 +153,7 @@
       position: sticky;
       top: 0;
       background: var(--bg-elevated);
+      -webkit-backdrop-filter: var(--glass-blur);
       backdrop-filter: var(--glass-blur);
       z-index: 100;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
@@ -177,6 +187,11 @@
       overflow: hidden;
       flex: 1;
       min-width: 0;
+    }
+
+    .tabs .tab {
+      appearance: none;
+      font-family: inherit;
     }
 
     .tab {
@@ -237,6 +252,7 @@
       border-radius: 20px;
       padding: 24px;
       box-shadow: var(--card-shadow);
+      -webkit-backdrop-filter: var(--glass-blur);
       backdrop-filter: var(--glass-blur);
       overflow: visible;
     }
@@ -259,6 +275,9 @@
       transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s ease;
       /* GPU acceleration */
       transform: translateZ(0);
+      /* Performance: defer rendering of off-screen cards */
+      content-visibility: auto;
+      contain-intrinsic-size: auto 380px;
     }
 
     .recipe-card:hover {
@@ -311,6 +330,7 @@
       right: 16px;
       padding: 6px 12px;
       background: var(--glass-bg);
+      -webkit-backdrop-filter: var(--glass-blur);
       backdrop-filter: var(--glass-blur);
       border: 1px solid var(--glass-border);
       border-radius: 20px;
@@ -366,6 +386,7 @@
       height: 36px;
       border-radius: 12px;
       background: rgba(0, 0, 0, 0.6);
+      -webkit-backdrop-filter: var(--glass-blur);
       backdrop-filter: var(--glass-blur);
       border: 1px solid rgba(255, 255, 255, 0.3);
       display: flex;
@@ -708,6 +729,7 @@
       justify-content: center;
       padding: 16px;
       z-index: 100;
+      -webkit-backdrop-filter: blur(4px);
       backdrop-filter: blur(4px);
     }
 
@@ -1763,7 +1785,7 @@
     /* ============= TOAST NOTIFICATIONS ============= */
     #toast-container {
       position: fixed;
-      top: 80px;
+      top: 120px;
       right: 20px;
       z-index: 10000;
       pointer-events: none;
@@ -1781,6 +1803,7 @@
       gap: 12px;
       pointer-events: all;
       animation: slideIn 0.3s ease-out;
+      -webkit-backdrop-filter: blur(10px);
       backdrop-filter: blur(10px);
     }
 
@@ -6222,42 +6245,6 @@
       }
     }
 
-    /* Toast System */
-    #toast-container {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      z-index: 9999;
-      pointer-events: none;
-    }
-
-    .toast {
-      pointer-events: auto;
-      min-width: 280px;
-      padding: 16px 20px;
-      background: var(--glass-bg);
-      backdrop-filter: blur(20px);
-      border: 1px solid var(--glass-border);
-      border-radius: 16px;
-      box-shadow: 20px 20px 60px rgba(0, 0, 0, 0.5);
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      color: var(--text);
-      animation: toastIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-    }
-
-    .toast.success {
-      border-left: 4px solid var(--accent);
-    }
-
-    .toast.error {
-      border-left: 4px solid var(--danger);
-    }
-
     @keyframes toastIn {
       from {
         opacity: 0;
@@ -6373,6 +6360,59 @@
       #recentActionsFloatBtn,
       #companionFloatBtn {
         display: none;
+      }
+
+      /* Smaller cards on very small screens */
+      .card {
+        padding: 12px;
+        border-radius: 12px;
+      }
+
+      /* Recipe grid on small screens */
+      .recipe-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+        padding: 16px 0;
+      }
+
+      .recipe-card {
+        height: 280px;
+      }
+
+      /* Modals take full width on small screens */
+      .modal {
+        width: 100%;
+        max-width: 100%;
+        margin: 8px;
+        max-height: calc(100vh - 16px);
+        border-radius: 12px;
+      }
+
+      /* Toast notification adjustments */
+      #toast-container {
+        left: 8px;
+        right: 8px;
+        top: 100px;
+      }
+
+      .toast {
+        min-width: auto;
+        max-width: 100%;
+      }
+    }
+
+    /* Tablet-ish screens (600-900px) */
+    @media (min-width: 501px) and (max-width: 900px) {
+      .recipe-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .dashboard-sidebar {
+        grid-column: span 1;
       }
     }
 

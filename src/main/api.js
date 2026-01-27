@@ -515,7 +515,9 @@ function _deductFromPantry_(ingredientLower, requiredQty, baseUnit) {
   const ing = normLower_(ingredientLower);
   const needBase = Number(requiredQty);
   const bu = canonicalUnit(baseUnit);
-  if (!ing || !Number.isFinite(needBase) || needBase <= 0 || !bu) return 0;
+  if (!ing || !Number.isFinite(needBase) || needBase <= 0 || !bu) {
+    return { deducted: 0, reason: 'invalid_input' };
+  }
 
   const hasQtyNum = pantryHasCol_('QtyNum');
   const hasUnit = pantryHasCol_('Unit');
@@ -532,10 +534,14 @@ function _deductFromPantry_(ingredientLower, requiredQty, baseUnit) {
      ORDER BY COALESCE(NameLower, lower(trim(Name))) ASC, ItemId ASC`
   ).all(ing, ing);
 
-  if (!rows || !rows.length) return 0;
+  if (!rows || !rows.length) {
+    return { deducted: 0, reason: 'not_in_pantry' };
+  }
 
   let remainingNeedBase = needBase;
   let deductedTotalBase = 0;
+  let hasUnitMismatch = false;
+  let pantryUnits = [];
 
   for (const r of rows) {
     if (remainingNeedBase <= 0) break;
@@ -544,9 +550,15 @@ function _deductFromPantry_(ingredientLower, requiredQty, baseUnit) {
     if (cur.qtyNum === null || !Number.isFinite(cur.qtyNum) || cur.qtyNum <= 0) continue;
     if (!cur.unit) continue;
 
+    // Track pantry units for error reporting
+    if (!pantryUnits.includes(cur.unit)) pantryUnits.push(cur.unit);
+
     // Convert pantry row quantity into the ingredient base unit (if compatible).
     const curBaseResult = convertQty_(cur.qtyNum, cur.unit, bu);
-    if (!curBaseResult.ok) continue;
+    if (!curBaseResult.ok) {
+      hasUnitMismatch = true;
+      continue;
+    }
     const curBase = curBaseResult.qty;
     if (!Number.isFinite(curBase) || curBase <= 0) continue;
 
@@ -556,8 +568,6 @@ function _deductFromPantry_(ingredientLower, requiredQty, baseUnit) {
     // Write back in the pantry row's own unit when possible (preserves user-entered unit text).
     const leftInRowUnitResult = convertQty_(leftBase, bu, cur.unit);
     const leftQtyNum = (leftInRowUnitResult.ok && Number.isFinite(leftInRowUnitResult.qty)) ? Math.max(0, leftInRowUnitResult.qty) : 0;
-
-    console.log(`[DEDUCT] ${ing}: cur=${cur.qtyNum}${cur.unit}, need=${needBase}${bu}, curBase=${curBase}, takeBase=${takeBase}, leftBase=${leftBase}, leftQty=${leftQtyNum}${cur.unit}`);
 
     const parsed = parseQtyText_(r.QtyText);
     const displayUnit = (parsed && parsed.unit) ? parsed.unit : (r.Unit || cur.unit || bu);
@@ -579,7 +589,24 @@ function _deductFromPantry_(ingredientLower, requiredQty, baseUnit) {
     remainingNeedBase -= takeBase;
   }
 
-  return deductedTotalBase;
+  // Determine the reason for any remaining undeducted amount
+  if (deductedTotalBase === 0 && hasUnitMismatch) {
+    return { 
+      deducted: 0, 
+      reason: 'unit_mismatch', 
+      details: `Cannot convert between ${bu} and ${pantryUnits.join('/')}` 
+    };
+  } else if (remainingNeedBase > 0 && deductedTotalBase > 0) {
+    return { 
+      deducted: deductedTotalBase, 
+      reason: 'partial', 
+      details: `Only ${deductedTotalBase} ${bu} available in pantry` 
+    };
+  } else if (deductedTotalBase === 0) {
+    return { deducted: 0, reason: 'insufficient' };
+  }
+
+  return { deducted: deductedTotalBase, reason: 'success' };
 }
 
 
@@ -587,9 +614,7 @@ function _addBackToPantry_(ingredientLower, addQty, baseUnit) {
   const ing = normLower_(ingredientLower);
   const addBase = Number(addQty);
   const bu = canonicalUnit(baseUnit);
-  console.log(`[ADD-BACK] Called for ${ing}: adding ${addBase} ${bu}`);
   if (!ing || !Number.isFinite(addBase) || addBase <= 0 || !bu) {
-    console.log(`[ADD-BACK] Skipped - invalid params: ing=${ing}, addBase=${addBase}, bu=${bu}`);
     return;
   }
 
@@ -625,8 +650,6 @@ function _addBackToPantry_(ingredientLower, addQty, baseUnit) {
     const newInRowUnitResult = convertQty_(newBase, bu, rowUnit);
     const newQtyNum = (newInRowUnitResult.ok && Number.isFinite(newInRowUnitResult.qty)) ? fmt(newInRowUnitResult.qty) : fmt(addBase);
 
-    console.log(`[ADD-BACK] ${ing}: cur=${cur.qtyNum}${cur.unit}, adding=${addBase}${bu}, curBase=${curBase}, newBase=${newBase}, newQty=${newQtyNum}${rowUnit}`);
-
     const parsed = parseQtyText_(r.QtyText);
     const displayUnit = (parsed && parsed.unit) ? parsed.unit : (r.Unit || rowUnit || bu);
     const qtyTextOut = displayUnit ? `${newQtyNum} ${displayUnit}`.trim() : `${newQtyNum}`;
@@ -638,7 +661,6 @@ function _addBackToPantry_(ingredientLower, addQty, baseUnit) {
       db().prepare(`UPDATE pantry SET QtyText=?, UpdatedAt=datetime('now') WHERE ItemId=?`)
         .run(qtyTextOut, r.ItemId);
     }
-    console.log(`[ADD-BACK] ${ing}: Updated pantry to ${newQtyNum} ${rowUnit}`);
     return;
   }
 
@@ -848,7 +870,12 @@ async function handleApiCall({ fn, payload, store }) {
       case 'returnItemToPantry': return returnItemToPantry(payload);
       case 'markShoppingItemPurchased': return markShoppingItemPurchased(payload);
 
-      case 'updateShoppingItem': return updateShoppingItem(payload);
+      case 'updateShoppingItem': 
+        // Handle both use cases: ingredient normalization OR purchase status update
+        if (payload && payload.newName && payload.sourceIds) {
+          return updateIngredientNormalization(payload);
+        }
+        return updateShoppingItem(payload);
       case 'deleteShoppingItem': return deleteShoppingItem(payload);
 
       case 'listPantry': return listPantry(payload);
@@ -2565,7 +2592,7 @@ function buildShoppingList(payload) {
   const hasQtyNum = pantryHasCol_('QtyNum');
   const hasUnit = pantryHasCol_('Unit');
   
-  // Build a map of pantry items for fast lookup
+  // Build a map of pantry items for fast lookup using canonical keys for consistency
   const pantryMap = new Map();
   try {
     const cols = ['ItemId', 'Name', 'NameLower', 'QtyText'];
@@ -2574,7 +2601,8 @@ function buildShoppingList(payload) {
     
     const pantryRows = db().prepare(`SELECT ${cols.join(', ')} FROM pantry`).all();
     for (const row of pantryRows) {
-      const key = normLower_(row.NameLower || row.Name);
+      // Use getCanonicalKey for consistency with ingredient aggregation
+      const key = getCanonicalKey(row.NameLower || row.Name);
       if (!pantryMap.has(key)) {
         pantryMap.set(key, []);
       }
@@ -2589,12 +2617,13 @@ function buildShoppingList(payload) {
     const filteredItems = [];
     
     for (const item of group.Items) {
-      const ingredientLower = normLower_(item.IngredientNorm);
+      // Use getCanonicalKey to match pantry - ensures "mayo" matches "mayonnaise"
+      const ingredientKey = getCanonicalKey(item.IngredientNorm);
       const requiredQty = item.QtyNum;
       const unit = canonicalUnit(item.Unit);
 
       // Check if this ingredient exists in pantry
-      const pantryEntries = pantryMap.get(ingredientLower) || [];
+      const pantryEntries = pantryMap.get(ingredientKey) || [];
       let totalPantryQty = 0;
       let pantryUnit = unit;
 
@@ -2772,7 +2801,7 @@ function markMealCooked(payload) {
   // Get all ingredients for this recipe
   const ingredients = db().prepare(`
     SELECT IngredientNorm, QtyNum, Unit 
-    FROM recipe_ingredients 
+    FROM ingredients 
     WHERE RecipeId = ?
   `).all(recipeId);
 
@@ -2794,16 +2823,29 @@ function markMealCooked(payload) {
     }
 
     // Deduct from pantry (only if pantry item exists)
-    const deductedAmount = _deductFromPantry_(ingredientNorm, qtyNum, unit || 'piece');
+    const deductResult = _deductFromPantry_(ingredientNorm, qtyNum, unit || 'piece');
     
-    if (deductedAmount > 0) {
+    if (deductResult.deducted > 0) {
       deducted.push({
         ingredient: ingredientNorm,
-        quantity: deductedAmount,
-        unit: unit || 'piece'
+        quantity: deductResult.deducted,
+        unit: unit || 'piece',
+        partial: deductResult.reason === 'partial',
+        details: deductResult.details || null
       });
     } else {
-      skipped.push({ ingredient: ingredientNorm, reason: 'not in pantry or insufficient' });
+      // Map reason codes to user-friendly messages
+      const reasonMessages = {
+        'not_in_pantry': 'not in pantry',
+        'unit_mismatch': deductResult.details || 'incompatible units (e.g., volume vs weight)',
+        'insufficient': 'insufficient quantity in pantry',
+        'invalid_input': 'invalid quantity'
+      };
+      skipped.push({ 
+        ingredient: ingredientNorm, 
+        reason: reasonMessages[deductResult.reason] || deductResult.reason,
+        details: deductResult.details || null
+      });
     }
   }
 
@@ -4370,7 +4412,7 @@ function getAdditionalItemsRange(payload) {
 }
 
 
-function updateShoppingItem({ newName, sourceIds }) {
+function updateIngredientNormalization({ newName, sourceIds }) {
   if (!newName || !sourceIds || !Array.isArray(sourceIds) || sourceIds.length === 0) {
     return ok_({ updated: 0 });
   }

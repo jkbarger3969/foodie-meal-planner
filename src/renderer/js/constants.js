@@ -1,5 +1,7 @@
 // Debug flag - set to false for production builds
-const DEBUG = true;
+// NOTE: app.js has its own DEBUG constant which is the one actually used at runtime.
+// This file is kept for potential future modularization.
+const DEBUG = false;
 
 // Debounce delays
 const DEBOUNCE_SEARCH = 500;

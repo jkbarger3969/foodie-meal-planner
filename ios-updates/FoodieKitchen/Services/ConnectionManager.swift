@@ -45,7 +45,7 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
     private let networkMonitor = NWPathMonitor()
     private let monitorQueue = DispatchQueue(label: "NetworkMonitor")
     
-    enum ConnectionStatus: Equatable {
+    enum ConnectionStatus {
         case connected
         case connecting
         case disconnected

@@ -32,6 +32,18 @@ contextBridge.exposeInMainWorld('Foodie', {
   sendRecipeToTablet: (recipeId) => ipcRenderer.invoke('companion:send-recipe', { recipeId }),
   getCompanionDevices: () => ipcRenderer.invoke('companion:get-devices'),
   getServerIP: () => ipcRenderer.invoke('companion:get-server-ip'),
+
+  // ========== PAIRING & TRUSTED DEVICES ==========
+  getPairingCode: () => ipcRenderer.invoke('companion:get-pairing-code'),
+  regeneratePairingCode: () => ipcRenderer.invoke('companion:regenerate-pairing-code'),
+  getTrustedDevices: () => ipcRenderer.invoke('companion:get-trusted-devices'),
+  untrustDevice: (deviceId) => ipcRenderer.invoke('companion:untrust-device', { deviceId }),
+  onPairingCodeChanged: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('pairing-code-changed', listener);
+    return () => ipcRenderer.removeListener('pairing-code-changed', listener);
+  },
+
   onCompanionDevicesChanged: (callback) => {
     const listener = (_event, devices) => callback(devices);
     ipcRenderer.on('companion:devices-changed', listener);

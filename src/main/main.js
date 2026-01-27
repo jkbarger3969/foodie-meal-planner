@@ -78,9 +78,20 @@ async function initStore() {
 class CompanionServer {
   constructor() {
     this.wss = null;
-    this.clients = new Map(); // deviceId -> { ws, deviceType, ip }
+    this.clients = new Map(); // deviceId -> { ws, deviceType, ip, authenticated }
     this.mainWindow = null;
     this.server = null; // Underlying HTTP server
+
+    // ========== PAIRING & AUTHENTICATION ==========
+    this.pairingCode = this.generatePairingCode();
+    this.trustedDevices = new Map(); // deviceId -> { name, pairedAt, lastSeen }
+    this.trustedDevicesPath = null; // Set after app ready
+    this.PAIRING_TIMEOUT = 30000; // 30 seconds to enter pairing code
+
+    // ========== RATE LIMITING ==========
+    this.rateLimits = new Map(); // deviceId -> { count, windowStart }
+    this.RATE_LIMIT_WINDOW = 1000; // 1 second window
+    this.RATE_LIMIT_MAX = 20; // Max 20 messages per second per device
 
     // ========== PHASE 9.6: STATE TRACKING FOR DIFFERENTIAL SYNC ==========
     this.clientState = new Map(); // deviceId -> { lastMealPlanHash, lastShoppingListHash, lastSyncTime }
@@ -89,6 +100,138 @@ class CompanionServer {
 
     this.bonjour = new Bonjour();
     this.service = null;
+  }
+
+  // ========== RATE LIMITING ==========
+  checkRateLimit(deviceId) {
+    const now = Date.now();
+    let limit = this.rateLimits.get(deviceId);
+
+    if (!limit || (now - limit.windowStart) > this.RATE_LIMIT_WINDOW) {
+      // New window
+      this.rateLimits.set(deviceId, { count: 1, windowStart: now });
+      return true;
+    }
+
+    if (limit.count >= this.RATE_LIMIT_MAX) {
+      console.warn(`⚠️ Rate limit exceeded for device ${deviceId}`);
+      return false;
+    }
+
+    limit.count++;
+    return true;
+  }
+
+  // ========== PAIRING CODE MANAGEMENT ==========
+  generatePairingCode() {
+    return String(Math.floor(100000 + Math.random() * 900000));
+  }
+
+  regeneratePairingCode() {
+    this.pairingCode = this.generatePairingCode();
+    console.log(`📱 New pairing code generated: ${this.pairingCode}`);
+    this.notifyPairingCodeChanged();
+    return this.pairingCode;
+  }
+
+  getPairingCode() {
+    return this.pairingCode;
+  }
+
+  notifyPairingCodeChanged() {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('pairing-code-changed', { code: this.pairingCode });
+    }
+  }
+
+  // ========== TRUSTED DEVICES PERSISTENCE ==========
+  initTrustedDevicesPath() {
+    if (!this.trustedDevicesPath) {
+      this.trustedDevicesPath = path.join(app.getPath('userData'), 'companion-devices.json');
+    }
+  }
+
+  loadTrustedDevices() {
+    this.initTrustedDevicesPath();
+    try {
+      if (fs.existsSync(this.trustedDevicesPath)) {
+        const data = JSON.parse(fs.readFileSync(this.trustedDevicesPath, 'utf8'));
+        this.trustedDevices = new Map(Object.entries(data));
+        console.log(`📱 Loaded ${this.trustedDevices.size} trusted device(s)`);
+      }
+    } catch (error) {
+      console.error('Failed to load trusted devices:', error);
+      this.trustedDevices = new Map();
+    }
+  }
+
+  saveTrustedDevices() {
+    this.initTrustedDevicesPath();
+    try {
+      const data = Object.fromEntries(this.trustedDevices);
+      fs.writeFileSync(this.trustedDevicesPath, JSON.stringify(data, null, 2));
+    } catch (error) {
+      console.error('Failed to save trusted devices:', error);
+    }
+  }
+
+  isDeviceTrusted(deviceId) {
+    return this.trustedDevices.has(deviceId);
+  }
+
+  trustDevice(deviceId, deviceName) {
+    const now = new Date().toISOString();
+    this.trustedDevices.set(deviceId, {
+      name: deviceName || `Device ${deviceId.slice(-6)}`,
+      pairedAt: now,
+      lastSeen: now
+    });
+    this.saveTrustedDevices();
+    console.log(`📱 Device trusted: ${deviceId} (${deviceName})`);
+  }
+
+  updateDeviceLastSeen(deviceId) {
+    if (this.trustedDevices.has(deviceId)) {
+      const device = this.trustedDevices.get(deviceId);
+      device.lastSeen = new Date().toISOString();
+      this.trustedDevices.set(deviceId, device);
+      this.saveTrustedDevices();
+    }
+  }
+
+  untrustDevice(deviceId) {
+    if (this.trustedDevices.has(deviceId)) {
+      this.trustedDevices.delete(deviceId);
+      this.saveTrustedDevices();
+      console.log(`📱 Device removed: ${deviceId}`);
+      
+      // Disconnect if currently connected
+      const client = this.clients.get(deviceId);
+      if (client && client.ws) {
+        client.ws.send(JSON.stringify({
+          type: 'unpaired',
+          message: 'Device has been unpaired from the desktop app'
+        }));
+        client.ws.close();
+      }
+      return true;
+    }
+    return false;
+  }
+
+  getTrustedDevices() {
+    const devices = [];
+    for (const [deviceId, info] of this.trustedDevices) {
+      const client = this.clients.get(deviceId);
+      devices.push({
+        deviceId,
+        name: info.name,
+        pairedAt: info.pairedAt,
+        lastSeen: info.lastSeen,
+        isOnline: !!client && client.authenticated
+      });
+    }
+    return devices;
   }
 
   // Send log to both console and renderer window
@@ -278,6 +421,7 @@ class CompanionServer {
       this.server.listen(port);
 
       console.log(`📱 Companion server & Image server started on port ${port}`);
+      console.log(`📱 Pairing code: ${this.pairingCode}`);
       this.logLocalIPs();
 
       // Advertise service via Bonjour (with network error resilience)
@@ -287,8 +431,18 @@ class CompanionServer {
         const clientIp = req.socket.remoteAddress;
         const deviceId = req.headers['x-device-id'] || `device-${Date.now()}`;
         const deviceType = req.headers['x-device-type'] || 'unknown';
+        const deviceName = req.headers['x-device-name'] || deviceType;
 
-        this.clients.set(deviceId, { ws, deviceType, ip: clientIp });
+        // Check if device is already trusted
+        const isTrusted = this.isDeviceTrusted(deviceId);
+        
+        this.clients.set(deviceId, { 
+          ws, 
+          deviceType, 
+          deviceName,
+          ip: clientIp, 
+          authenticated: isTrusted 
+        });
 
         // ========== PHASE 9.6: Initialize client state ==========
         this.clientState.set(deviceId, {
@@ -297,17 +451,58 @@ class CompanionServer {
           lastSyncTime: Date.now()
         });
 
-        console.log(`📱 ${deviceType} connected: ${deviceId} (${clientIp})`);
+        console.log(`📱 ${deviceType} connected: ${deviceId} (${clientIp}) - ${isTrusted ? 'TRUSTED' : 'NEEDS PAIRING'}`);
 
-        // Send initial connection success
-        ws.send(JSON.stringify({
-          type: 'connected',
-          serverId: os.hostname(),
-          timestamp: new Date().toISOString()
-        }));
+        if (isTrusted) {
+          // Trusted device - update last seen and send success
+          this.updateDeviceLastSeen(deviceId);
+          ws.send(JSON.stringify({
+            type: 'connected',
+            authenticated: true,
+            serverId: os.hostname(),
+            timestamp: new Date().toISOString()
+          }));
+        } else {
+          // New device - require pairing
+          ws.send(JSON.stringify({
+            type: 'pairing_required',
+            serverId: os.hostname(),
+            serverName: `Foodie (${os.hostname()})`,
+            timestamp: new Date().toISOString()
+          }));
+
+          // Set timeout for pairing - disconnect if not authenticated in time
+          const pairingTimeout = setTimeout(() => {
+            const client = this.clients.get(deviceId);
+            if (client && !client.authenticated) {
+              console.log(`📱 Pairing timeout for ${deviceId} - disconnecting`);
+              ws.send(JSON.stringify({
+                type: 'pairing_timeout',
+                message: 'Pairing code not received in time'
+              }));
+              ws.close();
+            }
+          }, this.PAIRING_TIMEOUT);
+
+          // Store timeout reference for cleanup
+          const client = this.clients.get(deviceId);
+          if (client) {
+            client.pairingTimeout = pairingTimeout;
+          }
+        }
 
         ws.on('message', (message) => {
           try {
+            // Rate limit check
+            if (!this.checkRateLimit(deviceId)) {
+              ws.send(JSON.stringify({
+                type: 'error',
+                error: 'rate_limited',
+                message: 'Too many requests. Please slow down.'
+              }));
+              return;
+            }
+
             const data = JSON.parse(message.toString());
             this.handleMessage(deviceId, data);
           } catch (error) {
@@ -316,7 +511,15 @@ class CompanionServer {
         });
 
         ws.on('close', () => {
+          // Clear pairing timeout if exists
+          const client = this.clients.get(deviceId);
+          if (client && client.pairingTimeout) {
+            clearTimeout(client.pairingTimeout);
+          }
+          
           this.clients.delete(deviceId);
+          // Clean up rate limits
+          this.rateLimits.delete(deviceId);
           // ========== PHASE 9.6: Clean up state and pending batches ==========
           this.clientState.delete(deviceId);
           if (this.pendingBatches.has(deviceId)) {
@@ -349,11 +552,29 @@ class CompanionServer {
     if (!client) return;
 
     try {
-      switch (message.type) {
-        case 'ping':
-          client.ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
-          break;
+      // ========== HANDLE PAIRING MESSAGE ==========
+      if (message.type === 'pair') {
+        await this.handlePairing(deviceId, message);
+        return;
+      }
 
+      // ========== PING IS ALWAYS ALLOWED ==========
+      if (message.type === 'ping') {
+        client.ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+        return;
+      }
+
+      // ========== REQUIRE AUTHENTICATION FOR ALL OTHER MESSAGES ==========
+      if (!client.authenticated) {
+        client.ws.send(JSON.stringify({
+          type: 'error',
+          error: 'not_authenticated',
+          message: 'Please pair this device first'
+        }));
+        return;
+      }
+
+      switch (message.type) {
         case 'request_shopping_list':
           await this.sendShoppingList(deviceId);
           break;
@@ -403,6 +624,46 @@ class CompanionServer {
       }
     } catch (error) {
       console.error(`Error handling message from ${deviceId}:`, error);
+    }
+  }
+
+  async handlePairing(deviceId, message) {
+    const client = this.clients.get(deviceId);
+    if (!client) return;
+
+    const providedCode = String(message.code || '').trim();
+    const deviceName = message.deviceName || client.deviceName || client.deviceType;
+
+    if (providedCode === this.pairingCode) {
+      // Pairing successful
+      client.authenticated = true;
+      
+      // Clear pairing timeout
+      if (client.pairingTimeout) {
+        clearTimeout(client.pairingTimeout);
+        client.pairingTimeout = null;
+      }
+
+      // Trust this device for future connections
+      this.trustDevice(deviceId, deviceName);
+
+      client.ws.send(JSON.stringify({
+        type: 'paired',
+        success: true,
+        serverId: os.hostname(),
+        message: 'Device paired successfully'
+      }));
+
+      console.log(`📱 Device paired: ${deviceId} (${deviceName})`);
+      this.notifyDevicesChanged();
+    } else {
+      // Wrong code
+      client.ws.send(JSON.stringify({
+        type: 'pairing_failed',
+        success: false,
+        message: 'Invalid pairing code'
+      }));
+      console.log(`📱 Pairing failed for ${deviceId} - wrong code`);
     }
   }
 
@@ -1443,6 +1704,7 @@ async function bootstrap() {
 
   // Initialize companion server for iOS apps
   companionServer = new CompanionServer();
+  companionServer.loadTrustedDevices(); // Load persisted trusted devices
   companionServer.start(8080);
 
   // IPC: API bridge
@@ -2143,6 +2405,30 @@ async function bootstrap() {
     } catch (e) {
       return { ok: false, error: e && e.message ? e.message : String(e) };
     }
+  });
+
+  // ========== PAIRING & TRUSTED DEVICES IPC HANDLERS ==========
+  ipcMain.handle('companion:get-pairing-code', async () => {
+    if (!companionServer) return { ok: false, error: 'Companion server not initialized' };
+    return { ok: true, code: companionServer.getPairingCode() };
+  });
+
+  ipcMain.handle('companion:regenerate-pairing-code', async () => {
+    if (!companionServer) return { ok: false, error: 'Companion server not initialized' };
+    const code = companionServer.regeneratePairingCode();
+    return { ok: true, code };
+  });
+
+  ipcMain.handle('companion:get-trusted-devices', async () => {
+    if (!companionServer) return { ok: false, error: 'Companion server not initialized', devices: [] };
+    const devices = companionServer.getTrustedDevices();
+    return { ok: true, devices };
+  });
+
+  ipcMain.handle('companion:untrust-device', async (_evt, { deviceId }) => {
+    if (!companionServer) return { ok: false, error: 'Companion server not initialized' };
+    const result = companionServer.untrustDevice(deviceId);
+    return { ok: result };
   });
 
   const win = await createWindow();

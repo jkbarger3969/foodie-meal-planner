@@ -1,6 +1,11 @@
 // ========== UTILITY HELPERS ==========
 // Debug flag - set to false for production
-const DEBUG = true;
+// NOTE: This is the active DEBUG flag. constants.js also has DEBUG for future modularization.
+const DEBUG = false;
+
+// Platform detection - used for keyboard shortcuts (Cmd vs Ctrl)
+const IS_MAC = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+const MOD_KEY_SYMBOL = IS_MAC ? '⌘' : 'Ctrl';
 
 // Null-safe getElementById with optional error handling
 function getEl(id, required = false) {
@@ -44,6 +49,75 @@ function cleanupListeners(elementOrId) {
 
 // ========== MAIN APPLICATION CODE ==========
 // ---------- utilities ----------
+
+// Convert decimal to user-friendly fraction string for display
+// Common cooking fractions: 1/8, 1/4, 1/3, 1/2, 2/3, 3/4
+function decimalToFraction(decimal) {
+  if (decimal === null || decimal === undefined || decimal === '') return '';
+  
+  const num = parseFloat(decimal);
+  if (isNaN(num)) return String(decimal);
+  if (num === 0) return '0';
+  
+  // Handle negative numbers
+  const sign = num < 0 ? '-' : '';
+  const absNum = Math.abs(num);
+  
+  // Extract whole number and fractional part
+  const whole = Math.floor(absNum);
+  const frac = absNum - whole;
+  
+  // If very close to whole number, return whole
+  if (frac < 0.03) {
+    return sign + (whole === 0 ? '0' : String(whole));
+  }
+  
+  // Common cooking fractions with their decimal equivalents and tolerance
+  const fractions = [
+    { decimal: 0.125, display: '⅛', tolerance: 0.02 },
+    { decimal: 0.167, display: '⅙', tolerance: 0.02 },
+    { decimal: 0.25, display: '¼', tolerance: 0.03 },
+    { decimal: 0.333, display: '⅓', tolerance: 0.03 },
+    { decimal: 0.375, display: '⅜', tolerance: 0.02 },
+    { decimal: 0.5, display: '½', tolerance: 0.04 },
+    { decimal: 0.625, display: '⅝', tolerance: 0.02 },
+    { decimal: 0.667, display: '⅔', tolerance: 0.03 },
+    { decimal: 0.75, display: '¾', tolerance: 0.04 },
+    { decimal: 0.833, display: '⅚', tolerance: 0.02 },
+    { decimal: 0.875, display: '⅞', tolerance: 0.02 },
+  ];
+  
+  // Find closest matching fraction
+  for (const f of fractions) {
+    if (Math.abs(frac - f.decimal) <= f.tolerance) {
+      if (whole === 0) {
+        return sign + f.display;
+      }
+      return sign + whole + ' ' + f.display;
+    }
+  }
+  
+  // If close to next whole number (e.g., 0.97 -> 1)
+  if (frac > 0.97) {
+    return sign + String(whole + 1);
+  }
+  
+  // No matching fraction - return decimal rounded to 2 places
+  const rounded = Math.round(absNum * 100) / 100;
+  return sign + String(rounded);
+}
+
+// Format a quantity for display (converts decimals to fractions when appropriate)
+function formatQuantityForDisplay(qtyNum, unit) {
+  if (qtyNum === '' || qtyNum === null || qtyNum === undefined) return '';
+  
+  const fractionStr = decimalToFraction(qtyNum);
+  if (unit) {
+    return `${fractionStr} ${unit}`.trim();
+  }
+  return fractionStr;
+}
+
 async function api(fn, payload) {
   const result = await window.Foodie.api(fn, payload);
   return result;
@@ -72,23 +146,6 @@ window.addEventListener('error', function (event) {
 // ==================== MODAL STATE TRACKING ====================
 // Track which modals are currently open to prevent flash on close
 const MODAL_STATE = {};
-
-// ==================== DATE HELPERS ====================
-// These are critical for the app to function. 
-// If they were missing or failed to load, the app would crash.
-
-function ymd(d) {
-  if (!d) return '';
-  return d.toISOString().split('T')[0];
-}
-
-function addDays(dStr, days) {
-  if (!dStr) return '';
-  const [y, m, d] = dStr.split('-').map(Number);
-  const date = new Date(y, m - 1, d);
-  date.setDate(date.getDate() + days);
-  return ymd(date);
-}
 
 // ==================== BACKUP HELPER FUNCTIONS ====================
 // These need to be defined early because they're called in ensureTabLoaded
@@ -213,51 +270,35 @@ document.addEventListener('mousedown', (e) => {
  * Opens a modal overlay with animation
  */
 function openModal(id) {
-  console.log('[openModal] Called with id:', id, 'MODAL_STATE:', MODAL_STATE[id]);
   const overlay = document.getElementById(id);
-  if (!overlay) {
-    console.log('[openModal] Overlay not found:', id);
-    return;
-  }
+  if (!overlay) return;
 
   // Prevent re-opening if already open (fixes flash on close)
-  if (MODAL_STATE[id]) {
-    console.log('[openModal] Modal already open, skipping:', id);
-    return;
-  }
+  if (MODAL_STATE[id]) return;
 
   MODAL_STATE[id] = true;
-  console.log('[openModal] Opening modal:', id);
 
   const modal = overlay.querySelector('.modal');
   overlay.style.display = 'flex';
-  overlay.style.pointerEvents = 'auto'; // Reset pointer events
+  overlay.style.pointerEvents = 'auto';
 
   if (modal) {
-    // Reset transform to get accurate bounds
     modal.style.transform = 'none';
     const rect = modal.getBoundingClientRect();
-    const originX = MOUSE_POS.x - (window.innerWidth - rect.width) / 2;
-    const originY = MOUSE_POS.y - (window.innerHeight - rect.height) / 2;
-    // Since modal is centered with flex, origin is relative to the modal itself
     modal.style.transformOrigin = `${MOUSE_POS.x - rect.left}px ${MOUSE_POS.y - rect.top}px`;
-    modal.style.transform = ''; // Restore
+    modal.style.transform = '';
   }
 
-  // Trigger animation next frame
   requestAnimationFrame(() => {
     overlay.classList.add('show');
   });
 }
 
 function closeModal(id) {
-  console.log('[closeModal] Called with id:', id);
   const overlay = document.getElementById(id);
   if (!overlay) return;
 
-  // Reset modal state
   MODAL_STATE[id] = false;
-  console.log('[closeModal] MODAL_STATE reset for:', id);
 
   // Immediately hide and reset pointer events
   overlay.style.display = 'none';
@@ -526,6 +567,7 @@ function debounce(func, wait) {
   };
 }
 
+// ==================== DATE HELPERS ====================
 function ymd(d) {
   const dt = (d instanceof Date) ? d : new Date(d);
   const y = dt.getFullYear();
@@ -671,9 +713,13 @@ const SEARCH_INDEX = {
 };
 
 // ========== PHASE 9.2: VIRTUAL SCROLLING ==========
+// NOTE: JS-based virtual scrolling is disabled because it doesn't work well with
+// responsive CSS grids (auto-fill columns). Instead, we use CSS content-visibility: auto
+// on .recipe-card for native browser-level rendering optimization. This provides
+// similar performance benefits without the complexity of calculating dynamic grid layouts.
 const VIRTUAL_SCROLL = {
-  enabled: false,            // Enable virtual scrolling
-  itemHeight: 120,          // Estimated height per recipe card (px)
+  enabled: false,            // Disabled - using CSS content-visibility instead
+  itemHeight: 404,          // 380px card + 24px gap
   bufferSize: 20,           // Number of items to render above/below viewport
   visibleRange: { start: 0, end: 50 },  // Currently visible range
   scrollTop: 0,             // Last scroll position
@@ -685,9 +731,6 @@ const VIRTUAL_SCROLL = {
 // Build search index for fast lookups
 function buildSearchIndex_() {
   if (!RECIPES || !RECIPES.length) return;
-
-  console.log('[Phase 9.4] Building search index...');
-  const startTime = performance.now();
 
   SEARCH_INDEX.index = new Map();
   SEARCH_INDEX.recipeMap = new Map();
@@ -734,33 +777,26 @@ function buildSearchIndex_() {
   }
 
   SEARCH_INDEX.lastBuiltTime = Date.now();
-  const buildTime = performance.now() - startTime;
-  console.log(`[Phase 9.4] Search index built in ${buildTime.toFixed(2)}ms - ${SEARCH_INDEX.index.size} terms indexed`);
 }
 
 // Fast indexed search
 function searchRecipesIndexed_(query) {
-  if (!query) return RECIPES; // Empty query = all recipes
+  if (!query) return RECIPES;
 
   const q = query.toLowerCase().trim();
 
   // Check if we've cached this exact search
   if (SEARCH_INDEX.lastSearchQuery === q && SEARCH_INDEX.lastSearchResults) {
-    console.log('[Phase 9.4] Using cached search results');
     return SEARCH_INDEX.lastSearchResults;
   }
 
   if (!SEARCH_INDEX.index || !SEARCH_INDEX.recipeMap) {
     // Fallback to linear search if index not built
-    console.log('[Phase 9.4] Index not built, falling back to linear search');
     return RECIPES.filter(r => {
       const title = String(r.Title || '').toLowerCase();
       return title.includes(q);
     });
   }
-
-  console.log(`[Phase 9.4] Indexed search for: "${q}"`);
-  const startTime = performance.now();
 
   // Split query into words for multi-word search
   const queryWords = q.split(/\s+/).filter(w => w.length >= 2);
@@ -806,15 +842,11 @@ function searchRecipesIndexed_(query) {
       return intersection;
     });
   } else {
-    // Fallback to linear search for very short queries
     matchingIds = new Set();
   }
 
   // Convert IDs to recipe objects
   const results = Array.from(matchingIds).map(id => SEARCH_INDEX.recipeMap.get(id)).filter(Boolean);
-
-  const searchTime = performance.now() - startTime;
-  console.log(`[Phase 9.4] Search completed in ${searchTime.toFixed(2)}ms - ${results.length} results`);
 
   // Cache the results
   SEARCH_INDEX.lastSearchQuery = q;
@@ -832,9 +864,6 @@ function calculateVisibleRange_() {
   const containerHeight = container.clientHeight || 600;
   const scrollHeight = container.scrollHeight || 0;
 
-  console.log('[Virtual Scroll] scrollTop:', scrollTop, 'containerHeight:', containerHeight, 'scrollHeight:', scrollHeight);
-  console.log('[Virtual Scroll] At bottom?', (scrollTop + containerHeight >= scrollHeight - 10));
-
   // Calculate which items are visible
   const startIndex = Math.max(0, Math.floor(scrollTop / VIRTUAL_SCROLL.itemHeight) - VIRTUAL_SCROLL.bufferSize);
   const endIndex = Math.min(
@@ -842,27 +871,32 @@ function calculateVisibleRange_() {
     Math.ceil((scrollTop + containerHeight) / VIRTUAL_SCROLL.itemHeight) + VIRTUAL_SCROLL.bufferSize
   );
 
-  console.log('[Virtual Scroll] Calculated indices - start:', startIndex, 'end:', endIndex, 'total:', VIRTUAL_SCROLL.totalItems);
-
   return { start: startIndex, end: endIndex };
 }
+
+// Throttled scroll handler - stored as named function for proper removal
+let _virtualScrollTimeout = null;
+let _virtualScrollHandler = null;
 
 function setupVirtualScrollListener_() {
   const container = document.getElementById('recipesList');
   if (!container) return;
 
-  // Remove existing listener if any
-  container.removeEventListener('scroll', handleVirtualScroll_);
+  // Remove existing listener if any (must use same function reference)
+  if (_virtualScrollHandler) {
+    container.removeEventListener('scroll', _virtualScrollHandler);
+  }
 
-  // Add scroll listener with throttling
-  let scrollTimeout;
-  container.addEventListener('scroll', () => {
-    if (scrollTimeout) clearTimeout(scrollTimeout);
+  // Create named handler for proper cleanup
+  _virtualScrollHandler = function() {
+    if (_virtualScrollTimeout) clearTimeout(_virtualScrollTimeout);
 
-    scrollTimeout = setTimeout(() => {
+    _virtualScrollTimeout = setTimeout(() => {
       handleVirtualScroll_();
     }, 16); // ~60fps throttle
-  });
+  };
+
+  container.addEventListener('scroll', _virtualScrollHandler);
 }
 
 function handleVirtualScroll_() {
@@ -940,11 +974,10 @@ const TAB_LOADED = {
 async function ensureTabLoaded(tabName) {
   if (TAB_LOADED[tabName]) return; // Already loaded
 
-  console.log(`[Phase 9.7] Lazy loading ${tabName} tab...`);
+  if (DEBUG) console.log(`[Lazy] Loading ${tabName} tab...`);
 
   switch (tabName) {
     case 'home':
-      // Home is typically loaded, but ensure it's refreshed if empty
       if (!TAB_LOADED.home || document.getElementById('dashboardDinnerTitle').textContent === 'Loading...') {
         await renderDashboard();
         TAB_LOADED.home = true;
@@ -952,9 +985,7 @@ async function ensureTabLoaded(tabName) {
       break;
 
     case 'recipes':
-      // Check if recipes list is actually populated
       if (!TAB_LOADED.recipes || document.getElementById('recipesList').children.length === 0) {
-        console.log('[Phase 9.7] Ensuring recipes are loaded...');
         await resetAndLoadRecipes();
         populateBreakfastRecipeDropdown();
         TAB_LOADED.recipes = true;
@@ -963,7 +994,6 @@ async function ensureTabLoaded(tabName) {
 
     case 'collections':
       if (!TAB_LOADED.collections || document.getElementById('collectionsList').children.length === 0) {
-        console.log('[Phase 9.7] Ensuring collections are loaded...');
         await loadCollections();
         TAB_LOADED.collections = true;
       }
@@ -971,7 +1001,6 @@ async function ensureTabLoaded(tabName) {
 
     case 'pantry':
       if (!TAB_LOADED.pantry || document.getElementById('pantryList').children.length === 0) {
-        console.log('[Phase 9.7] Ensuring pantry is loaded...');
         await loadPantry();
         TAB_LOADED.pantry = true;
       }
@@ -979,7 +1008,6 @@ async function ensureTabLoaded(tabName) {
 
     case 'admin':
       if (!TAB_LOADED.admin) {
-        console.log('[Phase 9.7] Ensuring admin is loaded...');
         await loadStores();
         await renderCuisineManagementUI();
         await loadBackupStatus();
@@ -988,95 +1016,58 @@ async function ensureTabLoaded(tabName) {
       break;
 
     case 'planner':
-      // Planner is loaded on startup, but if it failed or hasn't loaded yet, try again
       if (!TAB_LOADED.planner || document.getElementById('planGrid').children.length === 0) {
-        console.log('[Phase 9.7] Ensuring planner is loaded...');
         await loadPlan();
         TAB_LOADED.planner = true;
       }
       break;
 
     case 'shop':
-      // Shopping list generates on-demand, but we need to ensure the UI is in a valid state
       if (!TAB_LOADED.shop || document.getElementById('shopOut').children.length === 0) {
-        console.log('[Phase 9.7] Ensuring shopping list is ready...');
-        // Initialize with current global state (might be empty, which triggers empty state)
         if (SHOP.groups.length === 0) {
-          // If empty, try to render empty state explicitly
           renderShop_(SHOP.groups);
         } else {
-          // If we have groups, render them
           renderShop_(SHOP.groups);
         }
         TAB_LOADED.shop = true;
       }
       break;
   }
-
-  console.log(`[ensureTabLoaded] Completed for ${tabName}. TAB_LOADED state:`, TAB_LOADED);
 }
 
 // ---------- tabbing ----------
 async function setTab(tabName) {
-  console.log(`[setTab] Switching to tab: ${tabName}`);
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
+  // Update tab button states and ARIA attributes
+  document.querySelectorAll('.tab').forEach(t => {
+    const isActive = t.dataset.tab === tabName;
+    t.classList.toggle('active', isActive);
+    t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
 
   const tabElement = document.getElementById('tab-' + tabName);
-  console.log(`[setTab] Tab element for ${tabName}:`, tabElement);
 
   if (tabElement) {
-    // robust class-based toggling
+    // Robust class-based toggling for tab panels
     document.querySelectorAll('section[id^="tab-"]').forEach(s => {
       s.classList.remove('active-view');
-      s.style.display = ''; // Clear inline styles to let CSS handle it
+      s.style.display = '';
     });
     tabElement.classList.add('active-view');
-
-    // Legacy fallback just in case
     tabElement.style.display = 'block';
     tabElement.style.opacity = '1';
-    const computedStyle = window.getComputedStyle(tabElement);
-    console.log(`[setTab] Set display to empty string. Computed style:`, computedStyle.display);
-    console.log(`[setTab] Tab element children count:`, tabElement.children.length);
-    console.log(`[setTab] Tab element offsetHeight:`, tabElement.offsetHeight);
-    console.log(`[setTab] Tab element scrollHeight:`, tabElement.scrollHeight);
-    console.log(`[setTab] Tab element clientHeight:`, tabElement.clientHeight);
-    console.log(`[setTab] Tab element visibility:`, computedStyle.visibility);
-    console.log(`[setTab] Tab element opacity:`, computedStyle.opacity);
-    console.log(`[setTab] Tab element position:`, computedStyle.position);
-    console.log(`[setTab] Tab element overflow:`, computedStyle.overflow);
-
-    // Check first child
-    if (tabElement.children.length > 0) {
-      const firstChild = tabElement.children[0];
-      const childStyle = window.getComputedStyle(firstChild);
-      console.log(`[setTab] First child:`, firstChild);
-      console.log(`[setTab] First child display:`, childStyle.display);
-      console.log(`[setTab] First child offsetHeight:`, firstChild.offsetHeight);
-      console.log(`[setTab] First child visibility:`, childStyle.visibility);
-      console.log(`[setTab] First child innerHTML length:`, firstChild.innerHTML.length);
-      console.log(`[setTab] First child textContent:`, firstChild.textContent.substring(0, 100));
-      console.log(`[setTab] First child padding:`, childStyle.padding);
-      console.log(`[setTab] First child font-size:`, childStyle.fontSize);
-    }
-  } else {
-    console.error(`[setTab] ERROR: Tab element 'tab-${tabName}' not found!`);
   }
 
-  // PHASE 9.7: Lazy load tab data
+  // Lazy load tab data
   await ensureTabLoaded(tabName);
 
   // Load cuisine management UI when Admin tab is shown
   if (tabName === 'admin') {
     await renderCuisineManagementUI();
-    // ========== PHASE 6.1: Load backup status ==========
     await loadBackupStatus();
   }
 
-  // PHASE 8.2+: Update contextual help button visibility
+  // Update contextual help button visibility
   updateContextualHelpButton();
-
-  console.log(`[setTab] Finished switching to ${tabName}`);
 }
 
 const tabsElement = document.getElementById('tabs');
@@ -1218,6 +1209,9 @@ async function toggleRecipeFavorite(rid) {
   if (_favoriteToggleInProgress) return;
   _favoriteToggleInProgress = true;
 
+  // Store original state for rollback
+  let originalFavoriteState = null;
+
   try {
     // PHASE 4.5.4: Use user-specific favorites
     if (!ACTIVE_USER) {
@@ -1228,6 +1222,7 @@ async function toggleRecipeFavorite(rid) {
     // OPTIMISTIC UPDATE: Update UI immediately
     const rMatch = RECIPES.find(item => item.RecipeId === rid) || (SEARCH_INDEX.recipeMap ? SEARCH_INDEX.recipeMap.get(rid) : null);
     const isCurrentlyFavorite = rMatch ? (rMatch.is_favorite === true || rMatch.is_favorite === 1 || rMatch.is_favorite === '1') : false;
+    originalFavoriteState = isCurrentlyFavorite; // Store for rollback
     const isNowFavorite = !isCurrentlyFavorite; // Predict new state
 
     // Use incremental update for better performance
@@ -1267,19 +1262,31 @@ async function toggleRecipeFavorite(rid) {
 
       // Revert if API response mismatched (unlikely)
       if (res.isFavorite !== isNowFavorite) {
-        btns.forEach(btn => {
-          btn.innerHTML = res.isFavorite ? '★' : '☆';
-          btn.style.color = res.isFavorite ? 'gold' : 'white';
-        });
+        updateRecipeCard(rid, { is_favorite: res.isFavorite });
       }
     } else {
-      // Revert on error
-      btns.forEach(btn => {
-        btn.innerHTML = !isNowFavorite ? '★' : '☆';
-        btn.style.color = !isNowFavorite ? 'gold' : 'white';
+      // Revert UI on error
+      updateRecipeCard(rid, { is_favorite: originalFavoriteState });
+      // Also revert cache to match original state
+      const recipesToRevert = [RECIPES];
+      if (SEARCH_INDEX.recipeMap) {
+        const indexedRecipe = SEARCH_INDEX.recipeMap.get(rid);
+        if (indexedRecipe) recipesToRevert.push([indexedRecipe]);
+      }
+      recipesToRevert.forEach(list => {
+        const r = list.find(item => item.RecipeId === rid);
+        if (r) {
+          r.is_favorite = originalFavoriteState ? 1 : 0;
+        }
       });
       showToast('Failed to toggle favorite', 'error');
     }
+  } catch (err) {
+    // On exception, revert to original state
+    if (originalFavoriteState !== null) {
+      updateRecipeCard(rid, { is_favorite: originalFavoriteState });
+    }
+    showToast('Error toggling favorite: ' + (err.message || 'Unknown error'), 'error');
   } finally {
     // Allow next toggle after a short delay to prevent rapid double-clicks
     setTimeout(() => {
@@ -2288,6 +2295,10 @@ function renderIngredientsTable() {
     const cleanedQtyText = cleanQtyText(r.QtyText || '');
     const catOptions = optionHtml_(META.categories, r.Category || '');
     const storeOptions = storeOptionsHtml_(effectiveStoreId);
+    
+    // In view mode, display fractions; in edit mode, show decimals for easier editing
+    const displayQtyNum = isView ? decimalToFraction(r.QtyNum) : (r.QtyNum ?? '');
+    
     if (idx === 0) {
       console.log('[renderIngredientsTable] First ingredient catOptions length:', catOptions.length, 'storeOptions length:', storeOptions.length);
       console.log('[renderIngredientsTable] catOptions preview:', catOptions.substring(0, 200));
@@ -2302,7 +2313,7 @@ function renderIngredientsTable() {
               </div>
               <div class="col-2">
                 <label>Qty #</label>
-                <input ${disabledAttr} list="dlQtyNum" value="${escapeAttr(r.QtyNum ?? '')}" data-action="ing-set" data-idx="${idx}" data-key="QtyNum">
+                <input ${disabledAttr} list="dlQtyNum" value="${escapeAttr(displayQtyNum)}" data-action="ing-set" data-idx="${idx}" data-key="QtyNum">
               </div>
               <div class="col-2">
                 <label>Unit</label>
@@ -4645,11 +4656,27 @@ function renderShop_(groups) {
   }
 
   // Apply store filter
-  const filteredGroups = SHOP.storeFilter === 'all'
+  // Normalize store comparison to handle undefined/null/empty StoreIds
+  const normalizeStoreId = (sid) => (sid === null || sid === undefined || sid === '') ? 'unassigned' : String(sid);
+  const normalizedFilter = normalizeStoreId(SHOP.storeFilter);
+  
+  const filteredGroups = normalizedFilter === 'all'
     ? SHOP.groups
-    : SHOP.groups.filter(g => g.StoreId === SHOP.storeFilter);
+    : SHOP.groups.filter(g => normalizeStoreId(g.StoreId) === normalizedFilter);
 
   if (filteredGroups.length === 0) {
+    // If store filter resulted in empty, auto-reset to 'all' and show all groups
+    const storeSelect = document.getElementById('shopStoreFilter');
+    if (SHOP.storeFilter !== 'all' && storeSelect) {
+      console.warn(`[Shopping] Store filter "${SHOP.storeFilter}" has no items, resetting to "all"`);
+      SHOP.storeFilter = 'all';
+      storeSelect.value = 'all';
+      // Re-render with all groups
+      renderShop_(SHOP.groups);
+      return;
+    }
+    
+    // If truly empty (even with 'all'), show empty state
     out.innerHTML = `
           <div class="empty-state">
             <div class="empty-state-icon">🔍</div>
@@ -4674,10 +4701,17 @@ function renderShop_(groups) {
   const totalItems = filteredGroups.reduce((sum, g) => sum + g.Items.length, 0);
   const boughtCount = Object.values(boughtItems).filter(Boolean).length;
 
-  // Build summary text
-  const filterText = SHOP.storeFilter === 'all'
+  // Build summary text - use normalized filter for proper display
+  const getStoreName = (sid) => {
+    if (sid === 'all') return 'All Stores';
+    if (sid === 'unassigned' || !sid) return 'Unassigned';
+    const name = getStoreNameById(sid);
+    return name || `Store ${sid}`;
+  };
+  
+  const filterText = normalizedFilter === 'all'
     ? `${totalItems} item${totalItems !== 1 ? 's' : ''} across ${filteredGroups.length} store${filteredGroups.length !== 1 ? 's' : ''}`
-    : `${totalItems} item${totalItems !== 1 ? 's' : ''} at ${getStoreNameById(SHOP.storeFilter) || SHOP.storeFilter}`;
+    : `${totalItems} item${totalItems !== 1 ? 's' : ''} at ${getStoreName(SHOP.storeFilter)}`;
 
   // Add summary at the top
   out.innerHTML = `
@@ -4691,8 +4725,8 @@ function renderShop_(groups) {
           </div>
         </div>
       ` + filteredGroups.map(g => {
-    const storeName = getStoreNameById(g.StoreId) || (g.StoreId === 'unassigned' ? 'Unassigned' : g.StoreId);
-    const isUnassigned = (g.StoreId === 'unassigned');
+    const storeName = getStoreNameById(g.StoreId) || (normalizeStoreId(g.StoreId) === 'unassigned' ? 'Unassigned' : g.StoreId || 'Unassigned');
+    const isUnassigned = (normalizeStoreId(g.StoreId) === 'unassigned');
 
     // Group items by category (normalize to Title Case for display)
     const categoriesMap = {};
@@ -5528,9 +5562,15 @@ document.addEventListener('change', async (e) => {
 
       // Add to pantry when purchased
       if (ingredientNorm && qty > 0) {
-        const res = await api('markShoppingItemPurchased', { ingredientNorm, qty, unit: unit || '' });
-        if (res.ok) {
-          showToast(`${ingredientNorm} added to pantry`, 'success', 2000);
+        try {
+          const res = await api('markShoppingItemPurchased', { ingredientNorm, qty, unit: unit || '' });
+          if (res && res.ok) {
+            showToast(`${ingredientNorm} added to pantry`, 'success', 2000);
+          } else {
+            console.warn('[Shopping] Failed to add to pantry:', res && res.error);
+          }
+        } catch (err) {
+          console.error('[Shopping] Error adding to pantry:', err);
         }
       }
     } else {
@@ -5539,9 +5579,15 @@ document.addEventListener('change', async (e) => {
       // If unchecking, remove from pantry (return item)
       if (itemDiv) {
         if (ingredientNorm && qty > 0 && unit) {
-          const res = await api('returnItemToPantry', { ingredientNorm, qty, unit });
-          if (res.ok) {
-            showToast(`${ingredientNorm} returned to pantry`, 'success', 2000);
+          try {
+            const res = await api('returnItemToPantry', { ingredientNorm, qty, unit });
+            if (res && res.ok) {
+              showToast(`${ingredientNorm} returned to pantry`, 'success', 2000);
+            } else {
+              console.warn('[Shopping] Failed to return to pantry:', res && res.error);
+            }
+          } catch (err) {
+            console.error('[Shopping] Error returning to pantry:', err);
           }
         }
       }
@@ -5758,10 +5804,13 @@ async function updatePantryInsights() {
     const items = res.items || [];
 
     // Helper: check if item is low stock
+    // Item is only considered "low stock" if:
+    // 1. A threshold is set (threshold > 0)
+    // 2. Current quantity is at or below that threshold
     const isLowStock = (it) => {
       const qty = (it.QtyNum !== null && it.QtyNum !== undefined && String(it.QtyNum) !== '') ? Number(it.QtyNum) : null;
       const threshold = (it.low_stock_threshold !== null && it.low_stock_threshold !== undefined && String(it.low_stock_threshold) !== '') ? Number(it.low_stock_threshold) : null;
-      return qty !== null && threshold !== null && Number.isFinite(qty) && Number.isFinite(threshold) && qty <= threshold;
+      return qty !== null && threshold !== null && threshold > 0 && Number.isFinite(qty) && Number.isFinite(threshold) && qty <= threshold;
     };
 
     // Calculate stats
@@ -9824,40 +9873,8 @@ function bindUi() {
     resetSmartDefaults();
   });
 
-  // Keyboard shortcuts
-  document.addEventListener('keydown', (e) => {
-    // Cmd/Ctrl + K: Quick search (focus recipe search)
-    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-      e.preventDefault();
-      const tab = document.querySelector('.tab[data-tab="recipes"]');
-      if (tab) tab.click();
-      setTimeout(() => {
-        const searchBox = document.getElementById('recipeSearch');
-        if (searchBox) searchBox.focus();
-      }, 100);
-    }
-
-    // Cmd/Ctrl + N: New recipe
-    if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
-      e.preventDefault();
-      openRecipeModalNew();
-    }
-
-    // Cmd/Ctrl + P: Print current view
-    if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
-      e.preventDefault();
-      // Determine current tab and print accordingly
-      const activeTab = document.querySelector('.tab.active');
-      if (activeTab) {
-        const tabName = activeTab.dataset.tab;
-        if (tabName === 'pantry') {
-          document.getElementById('btnPantryPrint').click();
-        } else if (tabName === 'shop') {
-          document.getElementById('btnPrintShopAll').click();
-        }
-      }
-    }
-  });
+  // NOTE: Keyboard shortcuts are handled by the main handler in KEYBOARD SHORTCUTS section
+  // See: Cmd/Ctrl+K (command palette), Cmd/Ctrl+N (new recipe), Cmd/Ctrl+P (print)
 
   // ========== PHASE 3: CALENDAR GRID VIEW ==========
 
@@ -12579,8 +12596,90 @@ async function updateCompanionDevices() {
         serverAddr.textContent = 'ws://[checking...]:8080';
       }
     }
+
+    await updatePairingCode();
+    await updateTrustedDevices();
   } catch (e) {
     console.error('Failed to get companion devices:', e);
+  }
+}
+
+async function updatePairingCode() {
+  try {
+    const result = await Foodie.getPairingCode();
+    const codeEl = document.getElementById('companionPairingCode');
+    if (result.ok && result.code && codeEl) {
+      codeEl.textContent = result.code;
+    }
+  } catch (e) {
+    console.error('Failed to get pairing code:', e);
+  }
+}
+
+async function regeneratePairingCode() {
+  try {
+    const result = await Foodie.regeneratePairingCode();
+    if (result.ok && result.code) {
+      const codeEl = document.getElementById('companionPairingCode');
+      if (codeEl) {
+        codeEl.textContent = result.code;
+        codeEl.style.animation = 'none';
+        void codeEl.offsetWidth;
+        codeEl.style.animation = 'pulse 0.5s ease';
+      }
+      showToast('New pairing code generated', 'success');
+    }
+  } catch (e) {
+    console.error('Failed to regenerate pairing code:', e);
+    showToast('Failed to generate new code', 'error');
+  }
+}
+
+async function updateTrustedDevices() {
+  try {
+    const result = await Foodie.getTrustedDevices();
+    const listEl = document.getElementById('companionTrustedDeviceList');
+    if (!listEl) return;
+
+    if (!result.ok || !result.devices || result.devices.length === 0) {
+      listEl.innerHTML = '<div class="muted" style="font-size:12px;">No paired devices</div>';
+      return;
+    }
+
+    listEl.innerHTML = result.devices.map(d => {
+      const lastSeen = d.lastSeen ? new Date(d.lastSeen).toLocaleDateString() : 'Never';
+      const statusIcon = d.isOnline ? '🟢' : '⚪';
+      return `
+        <div class="companion-trusted-device" style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--line);">
+          <div>
+            <div style="font-size:13px;">${statusIcon} ${escapeHtml(d.name || 'Unknown Device')}</div>
+            <div class="muted" style="font-size:10px;">Last seen: ${lastSeen}</div>
+          </div>
+          <button class="mini danger" onclick="untrustDevice('${escapeAttr(d.deviceId)}')" title="Remove device">✕</button>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    console.error('Failed to get trusted devices:', e);
+  }
+}
+
+async function untrustDevice(deviceId) {
+  if (!confirm('Remove this device? It will need to re-enter the pairing code to connect again.')) {
+    return;
+  }
+  try {
+    const result = await Foodie.untrustDevice(deviceId);
+    if (result.ok) {
+      showToast('Device removed', 'success');
+      await updateTrustedDevices();
+      await updateCompanionDevices();
+    } else {
+      showToast('Failed to remove device', 'error');
+    }
+  } catch (e) {
+    console.error('Failed to untrust device:', e);
+    showToast('Error removing device', 'error');
   }
 }
 
@@ -12693,6 +12792,17 @@ if (typeof Foodie !== 'undefined' && Foodie.onPantryUpdated) {
     loadPantry();
     if (data && data.item) {
       showToast(`Added to pantry: ${data.item}`, 'success', 3000);
+    }
+  });
+}
+
+// Listen for pairing code changes (when code is regenerated from main process)
+if (typeof Foodie !== 'undefined' && Foodie.onPairingCodeChanged) {
+  Foodie.onPairingCodeChanged((data) => {
+    console.log('🔑 Pairing code changed:', data.code);
+    const codeEl = document.getElementById('companionPairingCode');
+    if (codeEl && data.code) {
+      codeEl.textContent = data.code;
     }
   });
 }
@@ -13233,79 +13343,9 @@ function updateContextualHelpButton() {
   }
 }
 
-/**
- * Global keyboard shortcut handler
- */
-function handleGlobalKeyboard(e) {
-  // Open shortcuts modal with ?
-  if (e.key === '?' && !e.target.matches('input, textarea')) {
-    e.preventDefault();
-    openKeyboardShortcutsModal();
-    return;
-  }
-
-  // Close modals with Esc
-  if (e.key === 'Escape') {
-    closeKeyboardShortcutsModal();
-    return;
-  }
-
-  // Don't handle shortcuts when typing in inputs
-  if (e.target.matches('input, textarea, select')) return;
-
-  // Cmd/Ctrl shortcuts
-  if (e.metaKey || e.ctrlKey) {
-    switch (e.key) {
-      case '1':
-      case '2':
-      case '3':
-      case '4':
-      case '5':
-      case '6':
-        e.preventDefault();
-        const tabs = ['planner', 'recipes', 'collections', 'shop', 'pantry', 'admin'];
-        const index = parseInt(e.key) - 1;
-        if (tabs[index]) {
-          setTab(tabs[index]);
-        }
-        break;
-
-      case 'k':
-        e.preventDefault();
-        // Open command palette if it exists
-        const cmdPalette = document.getElementById('commandPaletteBack');
-        if (cmdPalette) {
-          cmdPalette.style.display = 'flex';
-          const input = cmdPalette.querySelector('input');
-          if (input) input.focus();
-        }
-        break;
-
-      case 'f':
-        e.preventDefault();
-        // Focus search box
-        const searchBox = document.querySelector('#recipeSearch, #shopSearch, input[type="search"]');
-        if (searchBox) searchBox.focus();
-        break;
-
-      case 'g':
-        if (!e.shiftKey) {
-          e.preventDefault();
-          // Generate shopping list
-          const generateBtn = document.getElementById('btnBuildShop');
-          if (generateBtn && !generateBtn.disabled) {
-            generateBtn.click();
-          }
-        }
-        break;
-    }
-  }
-}
-
-// Initialize keyboard shortcuts
-document.addEventListener('keydown', handleGlobalKeyboard);
-
 // ============= END KEYBOARD SHORTCUTS & CONTEXTUAL HELP =============
+// NOTE: Main keyboard shortcuts handler is defined later in the file (around line 13545)
+// to avoid duplicate event listeners. See "// ============= KEYBOARD SHORTCUTS ============="
 
 function showToast(message, type = 'info', duration = 5000) {
   const container = document.getElementById('toast-container');
@@ -13625,13 +13665,16 @@ async function restoreAdditionalItem(data) {
 
 // ============= KEYBOARD SHORTCUTS =============
 document.addEventListener('keydown', (e) => {
-  // Esc - Close modals
+  // Esc - Close modals, context menus, and popups
   if (e.key === 'Escape') {
     // Close any open modal
     const modals = document.querySelectorAll('.modalBack[style*="display: flex"], .modalBack[style*="display:flex"]');
     modals.forEach(modal => {
       modal.style.display = 'none';
     });
+    // Close context menus and suggestions
+    hideRecipeContextMenu();
+    hidePantrySuggestions();
     return;
   }
 
@@ -13645,8 +13688,7 @@ document.addEventListener('keydown', (e) => {
   // Ignore shortcuts if typing in an input/textarea
   if (e.target.matches('input, textarea, select')) return;
 
-  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-  const modKey = isMac ? e.metaKey : e.ctrlKey;
+  const modKey = IS_MAC ? e.metaKey : e.ctrlKey;
 
   // ========== NAVIGATION SHORTCUTS ==========
 
@@ -13725,19 +13767,8 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // Cmd/Ctrl+K - Quick search (global - switches to recipes and focuses search)
-  if (modKey && e.key === 'k') {
-    e.preventDefault();
-    setTab('recipes');
-    setTimeout(() => {
-      const searchInput = document.getElementById('recipeSearch');
-      if (searchInput) {
-        searchInput.focus();
-        searchInput.select();
-      }
-    }, 50);
-    return;
-  }
+  // Cmd/Ctrl+K - Command palette (handled by initCommandPalette)
+  // Note: Do not handle here to avoid conflict with command palette handler
 
   // Cmd/Ctrl+F - Focus search (current tab)
   if (modKey && e.key === 'f') {
@@ -13806,117 +13837,116 @@ function getCurrentActiveTab() {
  * Show keyboard shortcuts help modal
  */
 function showKeyboardShortcutsHelp() {
-  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-  const mod = isMac ? '⌘' : 'Ctrl';
+  const mod = MOD_KEY_SYMBOL;
 
   const modal = document.createElement('div');
   modal.className = 'modalBack';
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+  modal.style.cssText = 'position:fixed;inset:0;background:var(--overlay);z-index:10000;display:flex;align-items:center;justify-content:center;';
 
   modal.innerHTML = `
-      <div style="background:#fff;border-radius:16px;padding:32px;max-width:700px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:0 25px 80px rgba(0,0,0,0.5);">
+      <div style="background:var(--card);border-radius:16px;padding:32px;max-width:700px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:0 25px 80px rgba(0,0,0,0.5);border:1px solid var(--line);">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
-          <h2 style="margin:0;font-size:24px;color:#111;">⌨️ Keyboard Shortcuts</h2>
-          <button onclick="this.closest('.modalBack').remove()" style="padding:8px 16px;border-radius:50%;border:1px solid #e5e7eb;background:#f9fafb;cursor:pointer;font-size:20px;color:#6b7280;">✕</button>
+          <h2 style="margin:0;font-size:24px;color:var(--text);">⌨️ Keyboard Shortcuts</h2>
+          <button onclick="this.closest('.modalBack').remove()" style="padding:8px 16px;border-radius:50%;border:1px solid var(--line);background:var(--bg-elevated);cursor:pointer;font-size:20px;color:var(--text-secondary);">✕</button>
         </div>
         
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
           <!-- Navigation -->
           <div>
-            <h3 style="margin:0 0 12px 0;font-size:16px;font-weight:600;color:#4da3ff;">Navigation</h3>
+            <h3 style="margin:0 0 12px 0;font-size:16px;font-weight:600;color:var(--accent);">Navigation</h3>
             <div style="display:flex;flex-direction:column;gap:8px;">
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">Recipes</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">${mod}+1</kbd>
+                <span style="color:var(--text);">Recipes</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">${mod}+1</kbd>
               </div>
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">Planner</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">${mod}+2</kbd>
+                <span style="color:var(--text);">Planner</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">${mod}+2</kbd>
               </div>
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">Shopping</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">${mod}+3</kbd>
+                <span style="color:var(--text);">Shopping</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">${mod}+3</kbd>
               </div>
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">Pantry</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">${mod}+4</kbd>
+                <span style="color:var(--text);">Pantry</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">${mod}+4</kbd>
               </div>
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">Collections</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">${mod}+5</kbd>
+                <span style="color:var(--text);">Collections</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">${mod}+5</kbd>
               </div>
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">Admin</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">${mod}+6</kbd>
+                <span style="color:var(--text);">Admin</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">${mod}+6</kbd>
               </div>
             </div>
           </div>
           
           <!-- Actions -->
           <div>
-            <h3 style="margin:0 0 12px 0;font-size:16px;font-weight:600;color:#4da3ff;">Actions</h3>
+            <h3 style="margin:0 0 12px 0;font-size:16px;font-weight:600;color:var(--accent);">Actions</h3>
             <div style="display:flex;flex-direction:column;gap:8px;">
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">New Recipe</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">${mod}+N</kbd>
+                <span style="color:var(--text);">New Recipe</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">${mod}+N</kbd>
               </div>
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">Save Recipe</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">${mod}+S</kbd>
+                <span style="color:var(--text);">Save Recipe</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">${mod}+S</kbd>
               </div>
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">Quick Search</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">${mod}+K</kbd>
+                <span style="color:var(--text);">Quick Search</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">${mod}+K</kbd>
               </div>
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">Focus Search</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">${mod}+F</kbd>
+                <span style="color:var(--text);">Focus Search</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">${mod}+F</kbd>
               </div>
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">Print</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">${mod}+P</kbd>
+                <span style="color:var(--text);">Print</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">${mod}+P</kbd>
               </div>
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">Close Modal</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">Esc</kbd>
+                <span style="color:var(--text);">Close Modal</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">Esc</kbd>
               </div>
             </div>
           </div>
           
           <!-- Editing -->
           <div>
-            <h3 style="margin:0 0 12px 0;font-size:16px;font-weight:600;color:#4da3ff;">Editing</h3>
+            <h3 style="margin:0 0 12px 0;font-size:16px;font-weight:600;color:var(--accent);">Editing</h3>
             <div style="display:flex;flex-direction:column;gap:8px;">
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">Undo</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">${mod}+Z</kbd>
+                <span style="color:var(--text);">Undo</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">${mod}+Z</kbd>
               </div>
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">Redo</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">${mod}+Shift+Z</kbd>
+                <span style="color:var(--text);">Redo</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">${mod}+Shift+Z</kbd>
               </div>
             </div>
           </div>
           
           <!-- Help -->
           <div>
-            <h3 style="margin:0 0 12px 0;font-size:16px;font-weight:600;color:#4da3ff;">Help</h3>
+            <h3 style="margin:0 0 12px 0;font-size:16px;font-weight:600;color:var(--accent);">Help</h3>
             <div style="display:flex;flex-direction:column;gap:8px;">
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">Show Shortcuts</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">?</kbd>
+                <span style="color:var(--text);">Show Shortcuts</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">?</kbd>
               </div>
               <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="color:#111;">Show Shortcuts</span>
-                <kbd style="padding:4px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:13px;color:#111;">${mod}+,</kbd>
+                <span style="color:var(--text);">Show Shortcuts</span>
+                <kbd style="padding:4px 8px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:4px;font-size:13px;color:var(--text);">${mod}+,</kbd>
               </div>
             </div>
           </div>
         </div>
         
-        <div style="margin-top:24px;padding-top:20px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#6b7280;font-size:13px;text-align:center;">
-            Press <kbd style="padding:2px 6px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:3px;font-size:12px;">Esc</kbd> to close this dialog
+        <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--line);">
+          <p style="margin:0;color:var(--text-secondary);font-size:13px;text-align:center;">
+            Press <kbd style="padding:2px 6px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:3px;font-size:12px;color:var(--text);">Esc</kbd> to close this dialog
           </p>
         </div>
       </div>
@@ -13979,7 +14009,7 @@ function getCommandRegistry() {
       icon: '📋',
       title: 'Go to Planner',
       description: 'View meal planning calendar',
-      shortcut: `${isMac ? '⌘' : 'Ctrl'}+1`,
+      shortcut: `${MOD_KEY_SYMBOL}+1`,
       action: () => document.querySelector('.tab[data-tab="planner"]')?.click()
     },
     {
@@ -13988,7 +14018,7 @@ function getCommandRegistry() {
       icon: '📚',
       title: 'Go to Recipes',
       description: 'Browse recipe library',
-      shortcut: `${isMac ? '⌘' : 'Ctrl'}+2`,
+      shortcut: `${MOD_KEY_SYMBOL}+2`,
       action: () => document.querySelector('.tab[data-tab="recipes"]')?.click()
     },
     {
@@ -13997,7 +14027,7 @@ function getCommandRegistry() {
       icon: '📦',
       title: 'Go to Collections',
       description: 'Manage recipe collections',
-      shortcut: `${isMac ? '⌘' : 'Ctrl'}+3`,
+      shortcut: `${MOD_KEY_SYMBOL}+3`,
       action: () => document.querySelector('.tab[data-tab="collections"]')?.click()
     },
     {
@@ -14006,7 +14036,7 @@ function getCommandRegistry() {
       icon: '🛒',
       title: 'Go to Shopping List',
       description: 'View shopping items',
-      shortcut: `${isMac ? '⌘' : 'Ctrl'}+4`,
+      shortcut: `${MOD_KEY_SYMBOL}+4`,
       action: () => document.querySelector('.tab[data-tab="shop"]')?.click()
     },
     {
@@ -14015,7 +14045,7 @@ function getCommandRegistry() {
       icon: '🥫',
       title: 'Go to Pantry',
       description: 'Manage pantry inventory',
-      shortcut: `${isMac ? '⌘' : 'Ctrl'}+5`,
+      shortcut: `${MOD_KEY_SYMBOL}+5`,
       action: () => document.querySelector('.tab[data-tab="pantry"]')?.click()
     },
     {
@@ -14024,7 +14054,7 @@ function getCommandRegistry() {
       icon: '⚙️',
       title: 'Go to Admin',
       description: 'App settings and tools',
-      shortcut: `${isMac ? '⌘' : 'Ctrl'}+6`,
+      shortcut: `${MOD_KEY_SYMBOL}+6`,
       action: () => document.querySelector('.tab[data-tab="admin"]')?.click()
     },
 
@@ -14035,7 +14065,7 @@ function getCommandRegistry() {
       icon: '➕',
       title: 'New Recipe',
       description: 'Create a new recipe',
-      shortcut: `${isMac ? '⌘' : 'Ctrl'}+N`,
+      shortcut: `${MOD_KEY_SYMBOL}+N`,
       action: () => openRecipeModalNew()
     },
     {
@@ -14126,7 +14156,7 @@ function getCommandRegistry() {
       icon: '🖨️',
       title: 'Print',
       description: 'Print current view',
-      shortcut: `${isMac ? '⌘' : 'Ctrl'}+P`,
+      shortcut: `${MOD_KEY_SYMBOL}+P`,
       action: () => {
         const currentTab = getCurrentActiveTab();
 
@@ -14151,7 +14181,7 @@ function getCommandRegistry() {
       icon: '🔍',
       title: 'Search',
       description: 'Quick search',
-      shortcut: `${isMac ? '⌘' : 'Ctrl'}+F`,
+      shortcut: `${MOD_KEY_SYMBOL}+F`,
       action: () => {
         const currentTab = getCurrentActiveTab();
         if (currentTab === 'recipes') {
@@ -14176,7 +14206,7 @@ function getCommandRegistry() {
       icon: '↩️',
       title: 'Undo',
       description: 'Undo last action',
-      shortcut: `${isMac ? '⌘' : 'Ctrl'}+Z`,
+      shortcut: `${MOD_KEY_SYMBOL}+Z`,
       action: () => undo()
     }
   ];
@@ -14856,14 +14886,6 @@ async function duplicateRecipe(recipeId) {
   }
 }
 
-// Close context menu on Esc
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    hideRecipeContextMenu();
-    hidePantrySuggestions();
-  }
-});
-
 // ============= PHASE 2.3: ADVANCED FILTER FUNCTIONS =============
 
 /**
@@ -15073,25 +15095,32 @@ async function renderDashboard() {
 
   // 3. Stats - Shopping List
   try {
-    // Quickest way is to define a helper or just re-use calculation if possible
-    // Since shopping list is on-demand, we might just show "Check List" or fetch range
-    // For now, let's just count items if we have a cached list, otherwise show generic
-    document.getElementById('dashShopCount').textContent = '-';
-    // Ideally call api('getShoppingList') but that requires dates. 
-    // Let's just default to "Check" for now or implement a quick count API later.
     document.getElementById('dashShopCount').textContent = 'View';
-  } catch (e) { }
+  } catch (e) {
+    console.warn('[Dashboard] Failed to update shop count:', e);
+  }
 
   // 4. Stats - Pantry Low Stock
   try {
-    const res = await api('listPantry', { q: 'lowstock' });
-    // Note: 'lowstock' isn't a natively supported query filters in listPantry likely, 
-    // but let's assume valid response for full pantry and filter client side if needed.
-    // Actually listPantry usually returns everything unless filtered.
-    // Let's rely on ensuring pantry tab loads first? No, that's slow.
-    // Let's just skip complex pantry logic for this V1 dashboard to avoid perf hit.
-    document.getElementById('dashLowStockCount').textContent = 'Check';
-  } catch (e) { }
+    const res = await api('listPantry', { q: '' });
+    if (res.ok && res.items) {
+      const lowStockCount = res.items.filter(item => {
+        const qty = item.QtyNum;
+        const threshold = item.low_stock_threshold;
+        // Only count as low stock if threshold is set (> 0) and qty is at or below it
+        return qty !== null && threshold !== null && Number(threshold) > 0 && Number(qty) <= Number(threshold);
+      }).length;
+      document.getElementById('dashLowStockCount').textContent = lowStockCount;
+      document.getElementById('dashLowStockLabel').textContent = lowStockCount === 1 ? 'Item' : 'Items';
+    } else {
+      document.getElementById('dashLowStockCount').textContent = '0';
+      document.getElementById('dashLowStockLabel').textContent = 'Items';
+    }
+  } catch (e) {
+    console.warn('[Dashboard] Failed to load pantry stats:', e);
+    document.getElementById('dashLowStockCount').textContent = '-';
+    document.getElementById('dashLowStockLabel').textContent = '';
+  }
 
   // 5. Total Recipes - fetch if not loaded yet
   if (RECIPES.length) {
@@ -15104,9 +15133,11 @@ async function renderDashboard() {
         RECIPES = recipeRes.recipes;
         document.getElementById('dashRecipeCount').textContent = RECIPES.length;
       } else {
+        console.warn('[Dashboard] Failed to load recipes:', recipeRes.error);
         document.getElementById('dashRecipeCount').textContent = '-';
       }
     } catch (e) {
+      console.warn('[Dashboard] Exception loading recipes:', e);
       document.getElementById('dashRecipeCount').textContent = '-';
     }
   }

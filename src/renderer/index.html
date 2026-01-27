@@ -67,26 +67,28 @@
         + Apple Calendar</div>
     </div>
     <div style="display:flex; align-items:center; gap:8px; flex-wrap:nowrap;">
-      <div class="tabs" id="tabs">
-        <div class="tab active" data-tab="home">🏠 Home</div>
-        <div class="tab" data-tab="planner">📋 Planner</div>
-        <div class="tab" data-tab="recipes">📚 Recipes</div>
-        <div class="tab" data-tab="collections">📦 Collections</div>
-        <div class="tab" data-tab="shop">🛒 Shop</div>
-        <div class="tab" data-tab="pantry">🥫 Pantry</div>
-        <div class="tab" data-tab="admin">⚙️ Admin</div>
+      <div class="tabs" id="tabs" role="tablist" aria-label="Main navigation">
+        <button class="tab active" data-tab="home" role="tab" aria-selected="true" aria-controls="tab-home">🏠 Home</button>
+        <button class="tab" data-tab="planner" role="tab" aria-selected="false" aria-controls="tab-planner">📋 Planner</button>
+        <button class="tab" data-tab="recipes" role="tab" aria-selected="false" aria-controls="tab-recipes">📚 Recipes</button>
+        <button class="tab" data-tab="collections" role="tab" aria-selected="false" aria-controls="tab-collections">📦 Collections</button>
+        <button class="tab" data-tab="shop" role="tab" aria-selected="false" aria-controls="tab-shop">🛒 Shop</button>
+        <button class="tab" data-tab="pantry" role="tab" aria-selected="false" aria-controls="tab-pantry">🥫 Pantry</button>
+        <button class="tab" data-tab="admin" role="tab" aria-selected="false" aria-controls="tab-admin">⚙️ Admin</button>
       </div>
       <div style="width:1px; height:24px; background:var(--line); margin:0 4px; flex-shrink:0;"></div>
       <button id="recentActionsFloatBtn" class="ghost" style="padding:6px 10px; font-size:14px; flex-shrink:0;"
         data-tooltip="Recent Actions - View activity and undo changes" data-tooltip-pos="bottom"
-        title="Recent Actions">🕐</button>
+        aria-label="Recent Actions - View activity and undo changes">🕐</button>
       <button id="companionFloatBtn" class="ghost" style="padding:6px 10px; font-size:14px; flex-shrink:0;"
         data-tooltip="Companion Devices - Send to iPhone/iPad" data-tooltip-pos="bottom"
-        title="Companion Devices">📱</button>
+        aria-label="Companion Devices - Send to iPhone or iPad">📱</button>
       <button id="contextualHelpBtn" class="ghost" style="padding:6px 10px; font-size:14px; flex-shrink:0;"
-        data-tooltip="Help - Get help for this page" data-tooltip-pos="bottom" title="Help">❓</button>
+        data-tooltip="Help - Get help for this page" data-tooltip-pos="bottom"
+        aria-label="Help - Get help for this page">❓</button>
       <button id="btnStartTour" class="ghost" style="padding:6px 10px; font-size:14px; flex-shrink:0;"
-        data-tooltip="App Tour - Take a guided tour" data-tooltip-pos="bottom" title="App Tour">🎯</button>
+        data-tooltip="App Tour - Take a guided tour" data-tooltip-pos="bottom"
+        aria-label="App Tour - Take a guided tour">🎯</button>
       <div class="user-switcher" style="flex-shrink:0;">
         <button id="btnUserSwitcher" class="user-switcher-btn" style="padding:6px 10px; font-size:12px;">
           <span id="activeUserAvatar">👨‍👩‍👧‍👦</span>
@@ -171,8 +173,8 @@
           <div class="stat-card" onclick="document.querySelector('[data-tab=pantry]').click()">
             <div class="stat-icon">⚠️</div>
             <div class="stat-info">
-              <div class="stat-value" id="dashLowStockCount">0</div>
-              <div class="stat-label">Low Stock</div>
+              <div class="stat-value"><span id="dashLowStockCount">0</span> <span id="dashLowStockLabel">Items</span></div>
+              <div class="stat-label">Pantry Low Stock</div>
             </div>
           </div>
           <div class="stat-card" onclick="document.querySelector('[data-tab=recipes]').click()">
@@ -1567,7 +1569,7 @@
   </div>
 
   <!-- RECIPE MODAL -->
-  <div class="modalBack" id="recipeModalBack">
+  <div class="modalBack" id="recipeModalBack" role="dialog" aria-modal="true" aria-labelledby="rmTitle">
     <div class="modal">
       <div class="modalHead">
         <div>
@@ -1674,7 +1676,7 @@
   </div>
 
   <!-- MEAL PICKER MODAL -->
-  <div class="modalBack" id="mealPickerBack">
+  <div class="modalBack" id="mealPickerBack" role="dialog" aria-modal="true" aria-labelledby="mpTitle">
     <div class="modal">
       <div class="modalHead">
         <div>
@@ -2164,7 +2166,7 @@
 
 
   <!-- Pantry item modal -->
-  <div id="pantryModalOverlay" class="modalBack" style="z-index:9999;">
+  <div id="pantryModalOverlay" class="modalBack" style="z-index:9999;" role="dialog" aria-modal="true" aria-labelledby="pantryModalTitle">
     <div class="modal animate-in" style="max-width:520px;">
       <div class="modalHead">
         <div>
@@ -2250,6 +2252,26 @@
     <div class="companion-status">
       <div class="companion-status-dot" id="companionStatusDot"></div>
       <div id="companionStatusText">Checking...</div>
+    </div>
+
+    <div class="hr"></div>
+
+    <div style="margin-bottom:12px;">
+      <strong style="font-size:13px;">Pairing Code</strong>
+      <div style="margin-top:8px; display:flex; align-items:center; gap:10px;">
+        <code id="companionPairingCode" style="font-size:24px; font-weight:700; letter-spacing:4px; background:var(--bg-elevated); padding:8px 16px; border-radius:8px; color:var(--accent);">------</code>
+        <button class="mini ghost" id="companionRegenerateCode" onclick="regeneratePairingCode()" title="Generate new code">🔄</button>
+      </div>
+      <div class="muted" style="font-size:11px; margin-top:6px;">Enter this code on your iOS device to pair</div>
+    </div>
+
+    <div class="hr"></div>
+
+    <div style="margin-bottom:12px;">
+      <strong style="font-size:13px;">Trusted Devices</strong>
+      <div id="companionTrustedDeviceList" style="margin-top:8px; min-height:40px;">
+        <div class="muted" style="font-size:12px;">No paired devices</div>
+      </div>
     </div>
 
     <div class="hr"></div>
