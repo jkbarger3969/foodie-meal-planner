@@ -45,11 +45,15 @@ class RecipeStore: ObservableObject {
     
     // NEW: Load a recipe by ID from desktop
     func loadRecipeById(_ recipeId: String) {
-        guard let conn = connection else { return }
-        
-        // Send request to desktop to load this recipe
+        print("📱 loadRecipeById called: \(recipeId)")
+        guard let conn = connection else {
+            print("❌ connection is nil!")
+            return
+        }
+        print("📱 isConnected=\(conn.isConnected), isPaired=\(conn.isPaired)")
         let message = Message(type: "load_recipe", data: ["recipeId": recipeId])
         conn.sendMessage(message)
+        print("📱 sendMessage called")
     }
     
     func scaleRecipe(by factor: Double) {

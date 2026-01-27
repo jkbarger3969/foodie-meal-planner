@@ -33,6 +33,7 @@ struct MealSlot: Identifiable, Codable, Equatable {
     let imageName: String?
     var additionalItems: [AdditionalItem]
     var assignedUsers: [AssignedUser]  // PHASE 4.5.7: Who this meal is for
+    var recipe: Recipe?  // NEW: Embedded recipe details for instant load
     
     var imageURL: URL? {
         guard let imageName = imageName, !imageName.isEmpty else { return nil }
@@ -68,6 +69,13 @@ struct MealSlot: Identifiable, Codable, Equatable {
             self.assignedUsers = usersData.compactMap { AssignedUser(from: $0) }
         } else {
             self.assignedUsers = []
+        }
+        
+        // NEW: Parse embedded recipe details (for instant load)
+        if let recipeDict = dict["recipe"] as? [String: Any] {
+            self.recipe = Recipe(from: recipeDict)
+        } else {
+            self.recipe = nil
         }
     }
 }

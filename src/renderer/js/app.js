@@ -6522,10 +6522,13 @@ function getCuisineEmoji(cuisine) {
 
 // Helper to get week start (Monday)
 function getWeekStart(dateStr) {
-  const date = new Date(dateStr);
-  const day = date.getDay();
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1); // Adjust to Monday
-  return new Date(date.setDate(diff)).toISOString().split('T')[0];
+  // Parse date as local to avoid timezone issues
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  const dayOfWeek = date.getDay();
+  const diff = date.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Adjust to Monday
+  const monday = new Date(year, month - 1, diff);
+  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
 }
 
 // ========== PHASE 3 HELPER FUNCTIONS ==========
@@ -6564,7 +6567,10 @@ async function renderPlanGrid() {
   for (let i = 0; i < days; i++) {
     const dateKey = addDays(PLAN.start, i);
     const plan = PLAN.plansByDate[dateKey] || {};
-    const dt = new Date(dateKey);
+    // Parse date correctly to avoid timezone issues
+    // dateKey is "YYYY-MM-DD" - parse as local date, not UTC
+    const [year, month, day] = dateKey.split('-').map(Number);
+    const dt = new Date(year, month - 1, day); // month is 0-indexed
     const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dt.getDay()];
 
     html += `<div class="grid-day">`;
@@ -12583,23 +12589,19 @@ async function updateCompanionDevices() {
   try {
     const result = await Foodie.getCompanionDevices();
     if (result.ok && result.devices) {
-      const deviceList = document.getElementById('companionDeviceList');
       const statusDot = document.getElementById('companionStatusDot');
       const statusText = document.getElementById('companionStatusText');
 
+      const pairedCount = result.devices.filter(d => d.authenticated).length;
+      
       if (result.devices.length === 0) {
-        deviceList.innerHTML = '<div class="muted" style="font-size:12px;">No devices connected</div>';
         statusDot.classList.add('offline');
         statusText.textContent = 'Server ready (no devices)';
       } else {
-        deviceList.innerHTML = result.devices.map(d => `
-            <div class="companion-device">
-              ${d.type === 'iPhone' ? '📱' : '📱'} ${d.type || 'Device'}
-              <div class="muted" style="font-size:11px;">${d.ip || 'Unknown IP'}</div>
-            </div>
-          `).join('');
         statusDot.classList.remove('offline');
-        statusText.textContent = `${result.devices.length} device${result.devices.length > 1 ? 's' : ''} connected`;
+        const connectedMsg = `${result.devices.length} connected`;
+        const pairedMsg = pairedCount > 0 ? `, ${pairedCount} paired` : '';
+        statusText.textContent = connectedMsg + pairedMsg;
       }
 
       // Update server address - show the actual local IP
@@ -12664,10 +12666,13 @@ async function updateTrustedDevices() {
     listEl.innerHTML = result.devices.map(d => {
       const lastSeen = d.lastSeen ? new Date(d.lastSeen).toLocaleDateString() : 'Never';
       const statusIcon = d.isOnline ? '🟢' : '⚪';
+      const deviceIcon = d.type === 'iPad' ? '📱' : '📱';
+      const deviceType = d.type === 'iPad' ? 'iPad' : d.type === 'iPhone' ? 'iPhone' : '';
+      const typeLabel = deviceType ? ` (${deviceType})` : '';
       return `
-        <div class="companion-trusted-device" style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--line);">
+        <div class="companion-trusted-device" style="display:flex; justify-content:space-between; align-items:center; padding:8px; background:rgba(255,255,255,0.04); border-radius:8px; margin-bottom:6px;">
           <div>
-            <div style="font-size:13px;">${statusIcon} ${escapeHtml(d.name || 'Unknown Device')}</div>
+            <div style="font-size:13px;">${statusIcon} ${deviceIcon} ${escapeHtml(d.name || 'Unknown Device')}${typeLabel}</div>
             <div class="muted" style="font-size:10px;">Last seen: ${lastSeen}</div>
           </div>
           <button class="mini danger" onclick="untrustDevice('${escapeAttr(d.deviceId)}')" title="Remove device">✕</button>
@@ -12793,10 +12798,19 @@ async function getLocalIP() {
   }
 }
 
-// Listen for device changes
+// Listen for device changes (debounced to prevent flashing)
+let _companionUpdateTimeout = null;
 if (typeof Foodie !== 'undefined' && Foodie.onCompanionDevicesChanged) {
   Foodie.onCompanionDevicesChanged((devices) => {
-    updateCompanionDevices();
+    // Only update if panel is visible
+    const panel = document.getElementById('companionPanel');
+    if (panel && panel.classList.contains('show')) {
+      // Debounce updates to prevent rapid flashing
+      if (_companionUpdateTimeout) clearTimeout(_companionUpdateTimeout);
+      _companionUpdateTimeout = setTimeout(() => {
+        updateCompanionDevices();
+      }, 300);
+    }
   });
 }
 
@@ -15032,11 +15046,10 @@ async function refreshDashboardIfToday(changedDate) {
 async function renderDashboard() {
   console.log('[Dashboard] Rendering...');
 
-  // 1. Welcome Message
+  // 1. Welcome Message (time-based greeting)
   const h = new Date().getHours();
   const greet = h < 12 ? 'Good Morning' : h < 18 ? 'Good Afternoon' : 'Good Evening';
-  const user = ACTIVE_USER ? ACTIVE_USER.name : 'Family';
-  document.getElementById('dashboardWelcome').textContent = `${greet}, ${user}`;
+  document.getElementById('dashboardWelcome').textContent = greet;
 
   // 2. Fetch "Dinner Tonight"
   const today = ymd(new Date());

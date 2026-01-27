@@ -163,6 +163,15 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
     // MARK: - Pairing
     
     func sendPairingCode(_ code: String) {
+        // Check if WebSocket is connected
+        guard let socket = webSocket else {
+            print("❌ WebSocket not connected, cannot send pairing code")
+            DispatchQueue.main.async {
+                self.pairingError = "Not connected to server. Please check your network."
+            }
+            return
+        }
+        
         let message: [String: Any] = [
             "type": "pair",
             "code": code,
@@ -172,39 +181,64 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: message),
               let jsonString = String(data: jsonData, encoding: .utf8) else {
             print("❌ Failed to serialize pairing message")
+            DispatchQueue.main.async {
+                self.pairingError = "Failed to create pairing request"
+            }
             return
         }
         
-        webSocket?.send(.string(jsonString)) { [weak self] error in
+        print("📤 Sending pairing code...")
+        socket.send(.string(jsonString)) { [weak self] error in
             if let error = error {
                 print("❌ Failed to send pairing code: \(error)")
                 DispatchQueue.main.async {
-                    self?.pairingError = "Failed to send code"
+                    self?.pairingError = "Failed to send code: \(error.localizedDescription)"
                 }
+            } else {
+                print("✅ Pairing code sent successfully")
             }
         }
     }
     
     private func receiveMessage() {
-        webSocket?.receive { [weak self] result in
+        guard let socket = webSocket else {
+            print("❌ receiveMessage: webSocket is nil, cannot listen for messages")
+            return
+        }
+        
+        socket.receive { [weak self] result in
             switch result {
             case .success(let message):
                 switch message {
                 case .string(let text):
+                    print("📥 Received string message (\(text.count) chars)")
                     if let data = text.data(using: .utf8) {
                         if let rawJSON = Message.getRawJSON(data),
-                           let type = rawJSON["type"] as? String,
-                           type == "meal_plan" {
-                            self?.handleMealPlan(rawJSON)
+                           let type = rawJSON["type"] as? String {
+                            print("📥 Message type: \(type)")
+                            if type == "meal_plan" {
+                                self?.handleMealPlan(rawJSON)
+                            } else if type == "recipe" {
+                                self?.handleRecipeMessage(rawJSON)
+                            } else {
+                                self?.handleRawMessage(text)
+                            }
                         } else {
                             self?.handleRawMessage(text)
                         }
                     }
                 case .data(let data):
+                    print("📥 Received data message (\(data.count) bytes)")
                     if let rawJSON = Message.getRawJSON(data),
-                       let type = rawJSON["type"] as? String,
-                       type == "meal_plan" {
-                        self?.handleMealPlan(rawJSON)
+                       let type = rawJSON["type"] as? String {
+                        print("📥 Message type: \(type)")
+                        if type == "meal_plan" {
+                            self?.handleMealPlan(rawJSON)
+                        } else if type == "recipe" {
+                            self?.handleRecipeMessage(rawJSON)
+                        } else if let text = String(data: data, encoding: .utf8) {
+                            self?.handleRawMessage(text)
+                        }
                     } else if let text = String(data: data, encoding: .utf8) {
                         self?.handleRawMessage(text)
                     }
@@ -214,20 +248,45 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
                 self?.receiveMessage()
                 
             case .failure(let error):
+                let nsError = error as NSError
+                print("❌ WebSocket receive error: \(error.localizedDescription)")
+                print("   Error domain: \(nsError.domain), code: \(nsError.code)")
                 Logger.error("WebSocket receive error: \(error)")
                 DispatchQueue.main.async {
+                    self?.isConnected = false
                     self?.handleDisconnection()
                 }
             }
         }
     }
     
-    private func handleMealPlan(_ json: [String: Any]) {
+    private func handleRecipeMessage(_ json: [String: Any]) {
+        guard let recipeData = json["data"] as? [String: Any],
+              let recipe = Recipe(from: recipeData) else {
+            print("❌ Failed to parse recipe from message")
+            return
+        }
+        
         DispatchQueue.main.async {
-            if let mealsArray = json["data"] as? [[String: Any]] {
-                let mealSlots = mealsArray.compactMap { MealSlot(from: $0) }
-                self.recipeStore?.setAvailableMealSlots(mealSlots)
-                print("📥 Received \(mealSlots.count) meal slots with additional items")
+            self.recipeStore?.setCurrentRecipe(recipe)
+        }
+    }
+    
+    private func handleMealPlan(_ json: [String: Any]) {
+        guard let mealsArray = json["data"] as? [[String: Any]] else {
+            return
+        }
+        
+        let mealSlots = mealsArray.compactMap { MealSlot(from: $0) }
+        
+        DispatchQueue.main.async {
+            // Ensure connection state is correct since we received a message
+            self.isConnected = true
+            self.isPaired = true
+            
+            self.recipeStore?.setAvailableMealSlots(mealSlots)
+            if !mealSlots.isEmpty {
+                self.recipeStore?.shouldShowMealList = true
             }
         }
     }
@@ -339,6 +398,7 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
                 Logger.success("Connected to companion server")
                 
             case "recipe":
+                // Now handled by handleRecipeMessage fast-path
                 if let data = message.data,
                    let recipe = Recipe(from: data) {
                     self.recipeStore?.setCurrentRecipe(recipe)
@@ -361,7 +421,6 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
                     
                     let recipes = recipesData.compactMap { Recipe(from: $0) }
                     self.recipeStore?.setAvailableRecipes(recipes)
-                    print("📥 Received \(recipes.count) recipes for today's meals")
                 }
                 
             default:
@@ -371,19 +430,38 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
     }
     
     func sendMessage(_ message: Message) {
+        print("📤 sendMessage: type=\(message.type), isConnected=\(isConnected), isPaired=\(isPaired)")
         guard isConnected && isPaired else {
-            print("⚠️ Not connected or not paired, cannot send message")
+            print("❌ sendMessage blocked: not connected or not paired")
+            return
+        }
+        
+        guard let socket = webSocket else {
+            print("❌ sendMessage: webSocket is nil!")
+            DispatchQueue.main.async {
+                self.isConnected = false
+                self.handleDisconnection()
+            }
             return
         }
         
         guard let data = message.toJSON(),
               let text = String(data: data, encoding: .utf8) else {
+            print("❌ sendMessage: failed to serialize")
             return
         }
         
-        webSocket?.send(.string(text)) { error in
+        print("📤 Sending: \(text)")
+        socket.send(.string(text)) { [weak self] error in
             if let error = error {
                 Logger.error("Send error: \(error)")
+                print("❌ Send failed with error: \(error.localizedDescription)")
+                DispatchQueue.main.async {
+                    self?.isConnected = false
+                    self?.handleDisconnection()
+                }
+            } else {
+                print("✅ Message sent successfully")
             }
         }
     }
@@ -402,9 +480,13 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: message),
               let jsonString = String(data: jsonData, encoding: .utf8) else { return }
         
-        webSocket?.send(.string(jsonString)) { error in
+        webSocket?.send(.string(jsonString)) { [weak self] error in
             if let error = error {
                 print("❌ Ping error: \(error.localizedDescription)")
+                DispatchQueue.main.async {
+                    self?.isConnected = false
+                    self?.handleDisconnection()
+                }
             }
         }
     }

@@ -119,11 +119,6 @@ struct ContentView: View {
                                 Button(action: { showRecipeList = true }) {
                                     Label("Meals", systemImage: "calendar")
                                 }
-                                
-                                Button(action: { showSettings = true }) {
-                                    Image(systemName: "gear")
-                                        .font(.title3)
-                                }
                             }
                         }
                     }
@@ -146,11 +141,9 @@ struct ContentView: View {
                             .padding(.horizontal)
                         
                         if !connection.isConnected {
-                            Button("Settings") {
-                                showSettings = true
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.large)
+                             Text("Waiting for connection...")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         } else if !recipeStore.availableMealSlots.isEmpty || !recipeStore.availableRecipes.isEmpty {
                             Button("View Today's Meals") {
                                 showRecipeList = true
@@ -196,7 +189,7 @@ struct ContentView: View {
                 return "Connected! \(totalMeals) meal(s) available."
             }
         } else {
-            return "Not connected. Configure server address in settings."
+            return "Waiting for connection..."
         }
     }
 }
@@ -220,7 +213,11 @@ struct RecipeListView: View {
                             
                             // Main dish button with image
                             Button(action: {
-                                recipeStore.loadRecipeById(mealSlot.recipeId)
+                                if let recipe = mealSlot.recipe {
+                                    recipeStore.setCurrentRecipe(recipe)
+                                } else {
+                                    recipeStore.loadRecipeById(mealSlot.recipeId)
+                                }
                                 dismiss()
                             }) {
                                 HStack(spacing: 12) {

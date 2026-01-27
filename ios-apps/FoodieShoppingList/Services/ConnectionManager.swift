@@ -179,6 +179,15 @@ class ConnectionManager: NSObject, ObservableObject, URLSessionWebSocketDelegate
     // MARK: - Pairing
     
     func sendPairingCode(_ code: String) {
+        // Check if WebSocket is connected
+        guard let task = webSocketTask else {
+            print("❌ WebSocket not connected, cannot send pairing code")
+            DispatchQueue.main.async {
+                self.pairingError = "Not connected to server. Please check your network."
+            }
+            return
+        }
+        
         let message: [String: Any] = [
             "type": "pair",
             "code": code,
@@ -188,15 +197,21 @@ class ConnectionManager: NSObject, ObservableObject, URLSessionWebSocketDelegate
         guard let jsonData = try? JSONSerialization.data(withJSONObject: message),
               let jsonString = String(data: jsonData, encoding: .utf8) else {
             print("❌ Failed to serialize pairing message")
+            DispatchQueue.main.async {
+                self.pairingError = "Failed to create pairing request"
+            }
             return
         }
         
-        webSocketTask?.send(.string(jsonString)) { [weak self] error in
+        print("📤 Sending pairing code...")
+        task.send(.string(jsonString)) { [weak self] error in
             if let error = error {
                 print("❌ Failed to send pairing code: \(error)")
                 DispatchQueue.main.async {
-                    self?.pairingError = "Failed to send code"
+                    self?.pairingError = "Failed to send code: \(error.localizedDescription)"
                 }
+            } else {
+                print("✅ Pairing code sent successfully")
             }
         }
     }

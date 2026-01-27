@@ -179,21 +179,36 @@ class CompanionServer {
     return this.trustedDevices.has(deviceId);
   }
 
-  trustDevice(deviceId, deviceName) {
+  trustDevice(deviceId, deviceName, deviceType) {
     const now = new Date().toISOString();
     this.trustedDevices.set(deviceId, {
       name: deviceName || `Device ${deviceId.slice(-6)}`,
+      type: deviceType || 'unknown',
       pairedAt: now,
       lastSeen: now
     });
     this.saveTrustedDevices();
-    console.log(`📱 Device trusted: ${deviceId} (${deviceName})`);
+    console.log(`📱 Device trusted: ${deviceId} (${deviceName}) [${deviceType}]`);
   }
 
   updateDeviceLastSeen(deviceId) {
     if (this.trustedDevices.has(deviceId)) {
       const device = this.trustedDevices.get(deviceId);
+      const client = this.clients.get(deviceId);
+
       device.lastSeen = new Date().toISOString();
+
+      // Update name and type if we have better info from the connected client
+      if (client) {
+        // ALWAYS update the name if provided by the client (allows renaming devices)
+        if (client.deviceName && client.deviceName !== device.name) {
+          device.name = client.deviceName;
+        }
+        if (client.deviceType && (!device.type || device.type === 'unknown')) {
+          device.type = client.deviceType;
+        }
+      }
+
       this.trustedDevices.set(deviceId, device);
       this.saveTrustedDevices();
     }
@@ -204,7 +219,7 @@ class CompanionServer {
       this.trustedDevices.delete(deviceId);
       this.saveTrustedDevices();
       console.log(`📱 Device removed: ${deviceId}`);
-      
+
       // Disconnect if currently connected
       const client = this.clients.get(deviceId);
       if (client && client.ws) {
@@ -223,9 +238,20 @@ class CompanionServer {
     const devices = [];
     for (const [deviceId, info] of this.trustedDevices) {
       const client = this.clients.get(deviceId);
+
+      // Prefer connected client's name if available and stored name looks like a fallback
+      let displayName = info.name;
+      if (client && client.deviceName) {
+        // If stored name is just "iPhone" or "iPad", use the client's actual name
+        if (info.name === 'iPhone' || info.name === 'iPad' || info.name === 'unknown') {
+          displayName = client.deviceName;
+        }
+      }
+
       devices.push({
         deviceId,
-        name: info.name,
+        name: displayName,
+        type: info.type || (client ? client.deviceType : 'unknown'),
         pairedAt: info.pairedAt,
         lastSeen: info.lastSeen,
         isOnline: !!client && client.authenticated
@@ -432,29 +458,62 @@ class CompanionServer {
         const deviceId = req.headers['x-device-id'] || `device-${Date.now()}`;
         const deviceType = req.headers['x-device-type'] || 'unknown';
         const deviceName = req.headers['x-device-name'] || deviceType;
-
-        // Check if device is already trusted
         const isTrusted = this.isDeviceTrusted(deviceId);
-        
-        this.clients.set(deviceId, { 
-          ws, 
-          deviceType, 
+
+        console.log(`📱 ${deviceType} connected: ${deviceId} (${clientIp}) - ${isTrusted ? 'TRUSTED' : 'NEEDS PAIRING'}`);
+
+        // Store client with fresh WebSocket reference
+        this.clients.set(deviceId, {
+          ws,
+          deviceType,
           deviceName,
-          ip: clientIp, 
-          authenticated: isTrusted 
+          ip: clientIp,
+          authenticated: isTrusted
         });
 
-        // ========== PHASE 9.6: Initialize client state ==========
+        // Initialize client state for differential sync
         this.clientState.set(deviceId, {
           lastMealPlanHash: null,
           lastShoppingListHash: null,
           lastSyncTime: Date.now()
         });
 
-        console.log(`📱 ${deviceType} connected: ${deviceId} (${clientIp}) - ${isTrusted ? 'TRUSTED' : 'NEEDS PAIRING'}`);
+        // CRITICAL: Set up message handler directly on this WebSocket instance
+        ws.on('message', async (rawMessage) => {
+          const messageText = rawMessage.toString();
+          console.log(`📥 Message from ${deviceId}: ${messageText.substring(0, 150)}`);
 
+          try {
+            const message = JSON.parse(messageText);
+            await this.handleMessage(deviceId, message);
+          } catch (err) {
+            console.error(`❌ Error handling message from ${deviceId}:`, err);
+          }
+        });
+
+        ws.on('close', (code, reason) => {
+          console.log(`📱 ${deviceType} disconnected: ${deviceId} (code=${code})`);
+          const client = this.clients.get(deviceId);
+          if (client && client.pairingTimeout) {
+            clearTimeout(client.pairingTimeout);
+          }
+          this.clients.delete(deviceId);
+          this.rateLimits.delete(deviceId);
+          this.clientState.delete(deviceId);
+          if (this.pendingBatches.has(deviceId)) {
+            const batch = this.pendingBatches.get(deviceId);
+            if (batch.timeout) clearTimeout(batch.timeout);
+            this.pendingBatches.delete(deviceId);
+          }
+          this.notifyDevicesChanged();
+        });
+
+        ws.on('error', (error) => {
+          console.error(`❌ WebSocket error for ${deviceId}:`, error.message);
+        });
+
+        // Send initial response based on trust status
         if (isTrusted) {
-          // Trusted device - update last seen and send success
           this.updateDeviceLastSeen(deviceId);
           ws.send(JSON.stringify({
             type: 'connected',
@@ -463,7 +522,6 @@ class CompanionServer {
             timestamp: new Date().toISOString()
           }));
         } else {
-          // New device - require pairing
           ws.send(JSON.stringify({
             type: 'pairing_required',
             serverId: os.hostname(),
@@ -471,7 +529,6 @@ class CompanionServer {
             timestamp: new Date().toISOString()
           }));
 
-          // Set timeout for pairing - disconnect if not authenticated in time
           const pairingTimeout = setTimeout(() => {
             const client = this.clients.get(deviceId);
             if (client && !client.authenticated) {
@@ -484,56 +541,11 @@ class CompanionServer {
             }
           }, this.PAIRING_TIMEOUT);
 
-          // Store timeout reference for cleanup
           const client = this.clients.get(deviceId);
           if (client) {
             client.pairingTimeout = pairingTimeout;
           }
         }
-
-        ws.on('message', (message) => {
-          try {
-            // Rate limit check
-            if (!this.checkRateLimit(deviceId)) {
-              ws.send(JSON.stringify({
-                type: 'error',
-                error: 'rate_limited',
-                message: 'Too many requests. Please slow down.'
-              }));
-              return;
-            }
-
-            const data = JSON.parse(message.toString());
-            this.handleMessage(deviceId, data);
-          } catch (error) {
-            console.error('Error parsing message:', error);
-          }
-        });
-
-        ws.on('close', () => {
-          // Clear pairing timeout if exists
-          const client = this.clients.get(deviceId);
-          if (client && client.pairingTimeout) {
-            clearTimeout(client.pairingTimeout);
-          }
-          
-          this.clients.delete(deviceId);
-          // Clean up rate limits
-          this.rateLimits.delete(deviceId);
-          // ========== PHASE 9.6: Clean up state and pending batches ==========
-          this.clientState.delete(deviceId);
-          if (this.pendingBatches.has(deviceId)) {
-            const batch = this.pendingBatches.get(deviceId);
-            if (batch.timeout) clearTimeout(batch.timeout);
-            this.pendingBatches.delete(deviceId);
-          }
-          console.log(`📱 ${deviceType} disconnected: ${deviceId}`);
-          this.notifyDevicesChanged();
-        });
-
-        ws.on('error', (error) => {
-          console.error(`WebSocket error for ${deviceId}:`, error);
-        });
 
         this.notifyDevicesChanged();
       });
@@ -593,8 +605,14 @@ class CompanionServer {
 
         case 'load_recipe':
           // iPad sends load_recipe with recipeId in data object
+          this.log('info', '📥 DESKTOP: Received load_recipe from iPad');
+          this.log('info', '   message: ' + JSON.stringify(message));
           if (message.data && message.data.recipeId) {
+            this.log('info', '   Loading recipe: ' + message.data.recipeId);
             await this.sendRecipe(deviceId, message.data.recipeId);
+            this.log('success', '   Recipe sent!');
+          } else {
+            this.log('error', '   ERROR: No recipeId in message.data');
           }
           break;
 
@@ -633,11 +651,12 @@ class CompanionServer {
 
     const providedCode = String(message.code || '').trim();
     const deviceName = message.deviceName || client.deviceName || client.deviceType;
+    const deviceType = client.deviceType || 'unknown';
 
     if (providedCode === this.pairingCode) {
       // Pairing successful
       client.authenticated = true;
-      
+
       // Clear pairing timeout
       if (client.pairingTimeout) {
         clearTimeout(client.pairingTimeout);
@@ -645,7 +664,7 @@ class CompanionServer {
       }
 
       // Trust this device for future connections
-      this.trustDevice(deviceId, deviceName);
+      this.trustDevice(deviceId, deviceName, deviceType);
 
       client.ws.send(JSON.stringify({
         type: 'paired',
@@ -654,7 +673,7 @@ class CompanionServer {
         message: 'Device paired successfully'
       }));
 
-      console.log(`📱 Device paired: ${deviceId} (${deviceName})`);
+      console.log(`📱 Device paired: ${deviceId} (${deviceName}) [${deviceType}]`);
       this.notifyDevicesChanged();
     } else {
       // Wrong code
@@ -833,11 +852,39 @@ class CompanionServer {
               }))
               : [];
 
+            // NEW: Fetch and embed full recipe data (for instant load on iOS)
+            const recipeResult = await handleApiCall({ fn: 'getRecipe', payload: { recipeId: meal.RecipeId }, store });
+            const ingredientsResult = await handleApiCall({ fn: 'listRecipeIngredients', payload: { recipeId: meal.RecipeId }, store });
+
+            let embeddedRecipe = null;
+            if (recipeResult && recipeResult.ok) {
+              const serializedRecipe = this.serializeRecipe(recipeResult.recipe);
+              const serializedIngredients = (ingredientsResult && ingredientsResult.ok && ingredientsResult.items)
+                ? ingredientsResult.items.map(ing => {
+                  const s = this.serializeIngredient(ing);
+                  return {
+                    IngredientId: `${meal.RecipeId}-${ing.idx || 0}`,
+                    IngredientName: s.IngredientNorm || s.IngredientRaw || 'Unknown',
+                    QtyText: s.QtyText || '',
+                    QtyNum: s.QtyNum,
+                    Unit: s.Unit || '',
+                    Category: s.Category || 'Other'
+                  };
+                })
+                : [];
+
+              embeddedRecipe = {
+                ...serializedRecipe,
+                ingredients: serializedIngredients
+              };
+            }
+
             meals.push({
               slot: slot.toLowerCase(),
               recipeId: meal.RecipeId,
               title: meal.Title,
               imageName: meal.Image_Name || '',
+              recipe: embeddedRecipe, // Embedded data
               assignedUsers: assignedUsers,
               additionalItems: additionalItems
             });
@@ -1173,11 +1220,18 @@ class CompanionServer {
     this.log('info', `🔍 pushToDeviceType('${deviceType}') called - checking ${this.clients.size} connected client(s)`);
 
     for (const [deviceId, client] of this.clients.entries()) {
+      this.log('info', `   Device ${deviceId}: type=${client.deviceType}, authenticated=${client.authenticated}, wsState=${client.ws.readyState}`);
+
       if (client.deviceType.toLowerCase() === targetType) {
+        // Only send to authenticated (paired) devices
+        if (!client.authenticated) {
+          this.log('warn', `⚠️  Skipping ${deviceId} - device not authenticated (not paired)`);
+          continue;
+        }
+
         if (client.ws.readyState === WebSocket.OPEN) {
           try {
             const payload = JSON.stringify(data);
-            // Log message preview (first 200 chars)
             const preview = payload.length > 200 ? payload.substring(0, 200) + '...' : payload;
             this.log('info', `📤 Sending to ${deviceId}: ${preview}`);
 
@@ -1292,7 +1346,7 @@ class CompanionServer {
       // Generate a version identifier based on current timestamp and item count
       // This allows iPhone to track which version of the list it has
       const version = `${Date.now()}-${items.length}`;
-      
+
       // Format items for iOS app
       const formattedItems = items.map((item, idx) => ({
         ItemId: item.id || `item-${idx}`,
@@ -1321,30 +1375,26 @@ class CompanionServer {
   }
 
   async pushTodaysMealsToTablets() {
-    console.log('🔍 pushTodaysMealsToTablets: Starting...');
     try {
       const today = new Date().toISOString().split('T')[0];
-      console.log(`🔍 pushTodaysMealsToTablets: Today is ${today}`);
 
-      // Get today's meal plan using the correct API
+      // Get active user (needed for user-specific meal plans)
+      const activeUserRes = await handleApiCall({ fn: 'getActiveUser', payload: {}, store });
+      const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
+
+      // Get today's meal plan
       const planResult = await handleApiCall({
-        fn: 'getPlansRange',
-        payload: {
-          start: today,
-          end: today
-        },
+        fn: 'getUserPlanMeals',
+        payload: { start: today, end: today, userId },
         store
       });
 
       if (!planResult || !planResult.ok || !Array.isArray(planResult.plans) || planResult.plans.length === 0) {
-        // No meal plan - send empty array
-        const sentCount = this.pushToDeviceType('ipad', {
-          type: 'todays_meals',
-          data: { data: [] },  // iOS expects nested data structure even when empty
+        return this.pushToDeviceType('ipad', {
+          type: 'meal_plan',
+          data: [],
           timestamp: new Date().toISOString()
         });
-        console.log(`📤 Pushed empty meal plan (no plan for today)`);
-        return sentCount;
       }
 
       const plan = planResult.plans[0];
@@ -1352,11 +1402,14 @@ class CompanionServer {
 
       // Process each meal slot
       for (const slot of ['Breakfast', 'Lunch', 'Dinner']) {
-        const meal = plan[slot];
+        const mealArray = plan[slot];
+        // getUserPlanMeals returns arrays for each slot (to support multiple meals)
+        if (!Array.isArray(mealArray) || mealArray.length === 0) continue;
+
+        const meal = mealArray[0];
         if (!meal || !meal.RecipeId) continue;
 
         const recipeId = meal.RecipeId;
-        const title = meal.Title;
 
         // Get recipe details
         const recipeResult = await handleApiCall({
@@ -1422,6 +1475,9 @@ class CompanionServer {
 
           meals.push({
             slot: slot.toLowerCase(),
+            recipeId: recipeId,
+            title: serializedRecipe.Title,
+            imageName: serializedRecipe.Image_Name || '',
             recipe: {
               ...serializedRecipe,
               ingredients: serializedIngredients
@@ -1432,15 +1488,12 @@ class CompanionServer {
         }
       }
 
-      const sentCount = this.pushToDeviceType('ipad', {
-        type: 'todays_meals',
-        data: { data: meals },  // iOS expects nested data structure
+      return this.pushToDeviceType('ipad', {
+        type: 'meal_plan',
+        data: meals,
         date: today,
         timestamp: new Date().toISOString()
       });
-
-      console.log(`📤 Pushed ${meals.length} meals for today to all iPads`);
-      return sentCount;
     } catch (error) {
       console.error('Error pushing meals:', error);
       throw error;
@@ -1510,7 +1563,9 @@ class CompanionServer {
     return Array.from(this.clients.entries()).map(([id, client]) => ({
       id,
       type: client.deviceType,
-      ip: client.ip
+      name: client.deviceName || client.deviceType,
+      ip: client.ip,
+      authenticated: client.authenticated || false
     }));
   }
 
@@ -2339,7 +2394,7 @@ async function bootstrap() {
         console.log(`📱 pushShoppingListItems() returned count: ${count}`);
         return { ok: true, count };
       }
-      
+
       // Fallback to generating from today's meals
       console.log('📱 No items passed, calling pushShoppingListToPhones()...');
       const count = await companionServer.pushShoppingListToPhones();

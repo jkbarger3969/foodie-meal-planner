@@ -2257,35 +2257,6 @@
     <div class="hr"></div>
 
     <div style="margin-bottom:12px;">
-      <strong style="font-size:13px;">Pairing Code</strong>
-      <div style="margin-top:8px; display:flex; align-items:center; gap:10px;">
-        <code id="companionPairingCode" style="font-size:24px; font-weight:700; letter-spacing:4px; background:var(--bg-elevated); padding:8px 16px; border-radius:8px; color:var(--accent);">------</code>
-        <button class="mini ghost" id="companionRegenerateCode" onclick="regeneratePairingCode()" title="Generate new code">🔄</button>
-      </div>
-      <div class="muted" style="font-size:11px; margin-top:6px;">Enter this code on your iOS device to pair</div>
-    </div>
-
-    <div class="hr"></div>
-
-    <div style="margin-bottom:12px;">
-      <strong style="font-size:13px;">Trusted Devices</strong>
-      <div id="companionTrustedDeviceList" style="margin-top:8px; min-height:40px;">
-        <div class="muted" style="font-size:12px;">No paired devices</div>
-      </div>
-    </div>
-
-    <div class="hr"></div>
-
-    <div style="margin-bottom:12px;">
-      <strong style="font-size:13px;">Connected Devices</strong>
-      <div id="companionDeviceList" style="margin-top:8px; min-height:40px;">
-        <div class="muted" style="font-size:12px;">No devices connected</div>
-      </div>
-    </div>
-
-    <div class="hr"></div>
-
-    <div>
       <strong style="font-size:13px; display:block; margin-bottom:8px;">Quick Actions</strong>
       <button class="companion-action-btn" id="companionSendShopping" onclick="sendShoppingListToPhones()">
         📋 Send Shopping List to iPhone
@@ -2296,6 +2267,26 @@
       <button class="companion-action-btn" id="companionSendRecipe" onclick="sendCurrentRecipeToTablet()" disabled>
         👨‍🍳 Send Current Recipe to iPad
       </button>
+    </div>
+
+    <div class="hr"></div>
+
+    <div style="margin-bottom:12px;">
+      <strong style="font-size:13px;">Paired Devices</strong>
+      <div id="companionTrustedDeviceList" style="margin-top:8px; min-height:40px;">
+        <div class="muted" style="font-size:12px;">No paired devices</div>
+      </div>
+    </div>
+
+    <div class="hr"></div>
+
+    <div style="margin-bottom:12px;">
+      <strong style="font-size:13px;">Pairing Code</strong>
+      <div style="margin-top:8px; display:flex; align-items:center; gap:10px;">
+        <code id="companionPairingCode" style="font-size:24px; font-weight:700; letter-spacing:4px; background:var(--bg-elevated); padding:8px 16px; border-radius:8px; color:var(--accent);">------</code>
+        <button class="mini ghost" id="companionRegenerateCode" onclick="regeneratePairingCode()" title="Generate new code">🔄</button>
+      </div>
+      <div class="muted" style="font-size:11px; margin-top:6px;">Enter this code on your iOS device to pair</div>
     </div>
 
     <div class="hr"></div>
@@ -2312,6 +2303,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Hidden element to track connected devices for status dot -->
+  <div id="companionDeviceList" style="display:none;"></div>
 
   <!-- PHASE 3.1: Recent Actions History Panel -->
   <!-- Recent actions button now in header -->
