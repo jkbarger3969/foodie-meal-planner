@@ -200,6 +200,9 @@ struct ContentView: View {
                 BarcodeScannerView()
                     .environmentObject(connection)
             }
+            .fullScreenCover(isPresented: $connection.requiresPairing) {
+                PairingView(connectionManager: connection)
+            }
             .onChange(of: connection.atStore) { oldValue, newValue in
                 if let newStore = newValue {
                     // Auto-switch to the store tab for a "Wow" experience

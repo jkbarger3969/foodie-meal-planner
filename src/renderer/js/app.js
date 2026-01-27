@@ -9347,6 +9347,20 @@ function bindUi() {
       }
       populateShoppingCollectionsDropdown();
     }
+
+    // Auto-refresh shopping list when toggled (if list already exists)
+    if (SHOP.start && SHOP.end) {
+      await buildShop();
+    }
+  });
+
+  // Auto-refresh shopping list when collection selection changes
+  document.getElementById('shopCollectionSelect').addEventListener('change', async () => {
+    // Only refresh if collections are enabled and there's already a list generated
+    const includeCollections = document.getElementById('shopIncludeCollections').checked;
+    if (includeCollections && SHOP.start && SHOP.end) {
+      await buildShop();
+    }
   });
 
   // Store filter dropdown for shopping list
@@ -12551,6 +12565,7 @@ function toggleCompanionPanel() {
   const panel = document.getElementById('companionPanel');
   panel.classList.toggle('show');
   if (panel.classList.contains('show')) {
+    panel.scrollTop = 0;
     updateCompanionDevices();
   }
 }

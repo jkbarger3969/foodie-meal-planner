@@ -176,6 +176,9 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showCookMode) {
             CookModeView()
         }
+        .fullScreenCover(isPresented: $connection.requiresPairing) {
+            PairingView(connectionManager: connection)
+        }
         .onChange(of: recipeStore.shouldShowMealList) { oldValue, newValue in
             if newValue {
                 showRecipeList = true

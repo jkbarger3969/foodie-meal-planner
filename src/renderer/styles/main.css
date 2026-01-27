@@ -1720,6 +1720,8 @@
       bottom: 204px;
       left: 24px;
       width: 320px;
+      max-height: calc(100vh - 240px);
+      overflow-y: auto;
       background: #111827;
       border: 1px solid var(--line);
       border-radius: 16px;
