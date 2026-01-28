@@ -7329,19 +7329,20 @@ function renderCollectionRecipes() {
         <div class="item">
           <div style="display:flex; justify-content:space-between; gap:10px; align-items:start;">
             <div style="display:flex; align-items:center; gap:12px; flex:1;">
+              ${!isAllRecipes ? `
               <div style="display:flex; flex-direction:column; gap:2px;">
-                <label style="font-size:11px; color:var(--muted); font-weight:600; opacity:${isAllRecipes ? 0.5 : 1};">Meal Role</label>
+                <label style="font-size:11px; color:var(--muted); font-weight:600;">Meal Role</label>
                 <select 
                        class="collection-role-select"
                        data-action="toggle-main-dish" 
                        data-rid="${escapeAttr(r.RecipeId)}"
                        data-cid="${escapeAttr(CURRENT_COLLECTION_ID || '')}"
-                       style="padding:4px 8px; border-radius:6px; border:1px solid var(--line); font-size:12px; background:var(--card); color:var(--text); cursor:pointer;"
-                       ${isAllRecipes ? 'disabled' : ''}>
+                       style="padding:4px 8px; border-radius:6px; border:1px solid var(--line); font-size:12px; background:var(--card); color:var(--text); cursor:pointer;">
                   <option value="1" ${r.IsMainDish ? 'selected' : ''}>Main Dish</option>
                   <option value="0" ${!r.IsMainDish ? 'selected' : ''}>Side Dish</option>
                 </select>
               </div>
+              ` : ''}
               <div style="flex:1;">
                 <strong>${escapeHtml(r.Title)}</strong>
                 <div class="muted">${escapeHtml(r.MealType || 'Any')} • ${escapeHtml(r.Cuisine || '')}</div>
@@ -7349,7 +7350,7 @@ function renderCollectionRecipes() {
             </div>
             <div class="actions">
               <button class="ghost" data-action="recipe-view" data-rid="${escapeAttr(r.RecipeId)}">View</button>
-              <button class="primary" data-action="assign-to-planner" data-rid="${escapeAttr(r.RecipeId)}" data-title="${escapeAttr(r.Title)}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">📅 Assign to Planner</button>
+              <button class="primary" data-action="assign-to-planner" data-rid="${escapeAttr(r.RecipeId)}" data-title="${escapeAttr(r.Title)}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">Assign to Planner</button>
             </div>
           </div>
         </div>
@@ -10406,6 +10407,16 @@ function bindUi() {
 
         if (!cid) return;
 
+        // If setting as main dish, update all OTHER dropdowns to Side Dish visually
+        if (isMain) {
+          const allSelects = collRecipesEl.querySelectorAll('.collection-role-select');
+          allSelects.forEach(sel => {
+            if (sel.dataset.rid !== rid) {
+              sel.value = '0'; // Set all others to Side Dish
+            }
+          });
+        }
+
         const res = await api('setMainDishInCollection', {
           collectionId: cid,
           recipeId: rid,
@@ -10413,13 +10424,11 @@ function bindUi() {
         });
 
         if (res.ok) {
-          showToast(isMain ? 'Set as main dish' : 'Set as side dish', 'success');
-          // DO NOT re-render here, it causes the flash/loop. 
-          // The state is already updated in DB and the select value is already changed by user.
+          showToast(isMain ? 'Set as main dish (others set to side dish)' : 'Set as side dish', 'success');
         } else {
           showToast(res.error || 'Failed to update', 'error');
-          // Revert visual state on error
-          e.target.value = isMain ? '0' : '1';
+          // Revert visual state on error - reload to get correct state
+          await loadCollectionRecipes(cid);
         }
       }
     });

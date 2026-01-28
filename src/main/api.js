@@ -2403,19 +2403,23 @@ function buildShoppingList(payload) {
     let meals;
     if (isWholeFamilyView) {
       // Whole Family: get ONLY recipes assigned to the Whole Family user
+      // EXCLUDE leftover meals - their ingredients were already purchased
       meals = db().prepare(`
         SELECT DISTINCT recipe_id
         FROM user_plan_meals
         WHERE date >= ? AND date <= ? AND recipe_id IS NOT NULL
           AND user_id = ?
+          AND (use_leftovers IS NULL OR use_leftovers = 0)
       `).all(start, end, wholeFamilyId);
     } else {
       // Individual user: get ONLY user's own recipes (no fallback)
+      // EXCLUDE leftover meals - their ingredients were already purchased
       meals = db().prepare(`
         SELECT DISTINCT recipe_id
         FROM user_plan_meals
         WHERE date >= ? AND date <= ? AND recipe_id IS NOT NULL
           AND user_id = ?
+          AND (use_leftovers IS NULL OR use_leftovers = 0)
       `).all(start, end, userId);
     }
 
@@ -2428,8 +2432,12 @@ function buildShoppingList(payload) {
 
     let plans;
     if (schema.hasNew) {
+      // Fetch UseLeftovers columns to exclude leftover meals
       plans = db().prepare(`
-        SELECT Date, BreakfastRecipeId, LunchRecipeId, DinnerRecipeId
+        SELECT Date, 
+               BreakfastRecipeId, BreakfastUseLeftovers,
+               LunchRecipeId, LunchUseLeftovers,
+               DinnerRecipeId, DinnerUseLeftovers
         FROM plans WHERE Date >= ? AND Date <= ? ORDER BY Date ASC
       `).all(start, end);
     } else if (schema.hasLegacy) {
@@ -2443,16 +2451,18 @@ function buildShoppingList(payload) {
 
     for (const p of plans) {
       if (schema.hasNew) {
-        if (p.BreakfastRecipeId) recipeIds.add(String(p.BreakfastRecipeId));
-        if (p.LunchRecipeId) recipeIds.add(String(p.LunchRecipeId));
-        if (p.DinnerRecipeId) recipeIds.add(String(p.DinnerRecipeId));
+        // Only include recipes that are NOT marked as leftovers
+        if (p.BreakfastRecipeId && !p.BreakfastUseLeftovers) recipeIds.add(String(p.BreakfastRecipeId));
+        if (p.LunchRecipeId && !p.LunchUseLeftovers) recipeIds.add(String(p.LunchRecipeId));
+        if (p.DinnerRecipeId && !p.DinnerUseLeftovers) recipeIds.add(String(p.DinnerRecipeId));
       } else if (schema.hasLegacy) {
         const b = parseMealJson_(p.Breakfast);
         const l = parseMealJson_(p.Lunch);
         const d = parseMealJson_(p.Dinner);
-        if (b && b.RecipeId) recipeIds.add(String(b.RecipeId));
-        if (l && l.RecipeId) recipeIds.add(String(l.RecipeId));
-        if (d && d.RecipeId) recipeIds.add(String(d.RecipeId));
+        // Check UseLeftovers flag in parsed JSON for legacy format
+        if (b && b.RecipeId && !b.UseLeftovers) recipeIds.add(String(b.RecipeId));
+        if (l && l.RecipeId && !l.UseLeftovers) recipeIds.add(String(l.RecipeId));
+        if (d && d.RecipeId && !d.UseLeftovers) recipeIds.add(String(d.RecipeId));
       }
     }
   }
@@ -2687,7 +2697,26 @@ function buildShoppingList(payload) {
   // Remove empty groups
   groups = groups.filter(g => g.Items.length > 0);
 
-  // Check for low stock warnings
+  // Build a set of ingredient names on the shopping list for filtering low stock warnings
+  // Store as array for flexible matching (partial/substring matches)
+  const shoppingListIngredients = [];
+  for (const group of groups) {
+    for (const item of group.Items) {
+      // Add both the canonical key and original name for matching
+      const canonicalKey = getCanonicalKey(item.IngredientNorm || item.DisplayTitle || '');
+      if (canonicalKey) shoppingListIngredients.push(canonicalKey);
+      
+      // Also add original names if they exist
+      if (item.OriginalNames && Array.isArray(item.OriginalNames)) {
+        for (const name of item.OriginalNames) {
+          const key = getCanonicalKey(name);
+          if (key) shoppingListIngredients.push(key);
+        }
+      }
+    }
+  }
+
+  // Check for low stock warnings - ONLY for items on the shopping list
   const hasLowStockThreshold = pantryHasCol_('low_stock_threshold');
 
   if (hasQtyNum && hasLowStockThreshold) {
@@ -2703,13 +2732,23 @@ function buildShoppingList(payload) {
       `).all();
 
       for (const row of lowStockRows) {
-        pantryWarnings.push({
-          name: row.Name,
-          current: row.QtyNum,
-          threshold: row.low_stock_threshold,
-          unit: row.Unit || '',
-          message: `${row.Name}: ${row.QtyNum} ${row.Unit || ''} (threshold: ${row.low_stock_threshold})`
+        // Check if this pantry item matches any ingredient on the shopping list
+        // Use flexible matching: pantry "chicken" matches "chicken breast", "chicken thigh", etc.
+        const pantryKey = getCanonicalKey(row.Name);
+        const isOnList = shoppingListIngredients.some(ingredient => {
+          // Check if either contains the other (bidirectional matching)
+          return ingredient.includes(pantryKey) || pantryKey.includes(ingredient);
         });
+        
+        if (isOnList) {
+          pantryWarnings.push({
+            name: row.Name,
+            current: row.QtyNum,
+            threshold: row.low_stock_threshold,
+            unit: row.Unit || '',
+            message: `${row.Name}: ${row.QtyNum} ${row.Unit || ''} (threshold: ${row.low_stock_threshold})`
+          });
+        }
       }
     } catch (e) {
       console.log('[buildShoppingList] Could not check low stock:', e.message);
