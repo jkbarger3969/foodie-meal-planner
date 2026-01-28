@@ -1975,17 +1975,13 @@ async function openRecipeModalNew() {
 }
 
 async function ensureStoresAndCategoriesLoaded() {
-  console.log('[ensureStoresAndCategoriesLoaded] STORES.length:', STORES?.length, 'META.categories.length:', META?.categories?.length, 'categoriesLoaded:', META.categoriesLoaded);
   if (!STORES || STORES.length === 0) {
     try {
-      console.log('[ensureStoresAndCategoriesLoaded] Loading stores...');
       const res = await api('listStores', {});
-      console.log('[ensureStoresAndCategoriesLoaded] listStores result:', res);
       if (res.ok && res.stores) {
         STORES = res.stores;
         STORE_ID_TO_NAME = {};
         for (const s of STORES) STORE_ID_TO_NAME[String(s.StoreId)] = String(s.Name || '');
-        console.log('[ensureStoresAndCategoriesLoaded] STORES loaded:', STORES.length);
       }
     } catch (e) {
       console.error('Failed to load stores:', e);
@@ -1994,17 +1990,13 @@ async function ensureStoresAndCategoriesLoaded() {
   // Load categories from database if not already loaded
   if (!META.categoriesLoaded) {
     try {
-      console.log('[ensureStoresAndCategoriesLoaded] Loading categories from database...');
       const catRes = await api('getIngredientCategories', {});
-      console.log('[ensureStoresAndCategoriesLoaded] getIngredientCategories result:', catRes);
       if (catRes && catRes.ok && Array.isArray(catRes.categories) && catRes.categories.length > 0) {
         META.categories = [''].concat(catRes.categories);
         META.categoriesLoaded = true;
-        console.log('[ensureStoresAndCategoriesLoaded] META.categories loaded from DB:', META.categories);
       } else {
         META.categories = [''].concat(DEFAULT_ING_CATEGORIES);
         META.categoriesLoaded = true;
-        console.log('[ensureStoresAndCategoriesLoaded] Using default categories:', META.categories.length);
       }
     } catch (e) {
       console.error('Failed to load categories:', e);
@@ -2012,9 +2004,7 @@ async function ensureStoresAndCategoriesLoaded() {
       META.categoriesLoaded = true;
     }
   }
-  console.log('[ensureStoresAndCategoriesLoaded] FINAL - STORES:', STORES?.length, 'META.categories:', META?.categories?.length);
 }
-
 let _recipeModalLoading = false; // Prevent parallel modal loads
 
 // ADDED: Send to iPad function
@@ -2056,7 +2046,6 @@ window.openRecipeModalView = async function (recipeId) {
 
     document.getElementById('rTitle').value = r.Title || '';
     document.getElementById('rUrl').value = r.URL || '';
-    console.log('[openRecipeModalView] After setting rUrl.value:', document.getElementById('rUrl').value);
     document.getElementById('rImage').value = r.Image_Name || r.Image || '';
     setCuisineSelect_(r.Cuisine || '');
     document.getElementById('rMealType').value = r.MealType || 'Any';
@@ -2064,15 +2053,9 @@ window.openRecipeModalView = async function (recipeId) {
     document.getElementById('rInstructions').value = r.Instructions || '';
 
     await loadIngredientsForCurrentRecipe();
-    // Note: loadIngredientsForCurrentRecipe already calls renderIngredientsTable()
-    console.log('[openRecipeModalView] After loadIngredients, rUrl.value:', document.getElementById('rUrl').value);
 
     openRecipeModal();
-    console.log('[openRecipeModalView] After openRecipeModal, rUrl.value:', document.getElementById('rUrl').value);
     setRecipeModalMode('view');
-    console.log('[openRecipeModalView] After setRecipeModalMode, rUrl.value:', document.getElementById('rUrl').value);
-    // Do NOT call renderIngredientsTable() again here - it was already called in loadIngredientsForCurrentRecipe()
-    console.log('[openRecipeModalView] rUrlView.innerHTML:', document.getElementById('rUrlView').innerHTML);
 
     // ========== PHASE 3.1: Add to recent history ==========
     addToRecentRecipes(r.RecipeId, r.Title, r.Cuisine, r.MealType);
@@ -2341,11 +2324,6 @@ function renderIngredientsTable() {
     // In view mode, display fractions; in edit mode, show decimals for easier editing
     const displayQtyNum = isView ? decimalToFraction(r.QtyNum) : (r.QtyNum ?? '');
 
-    if (idx === 0) {
-      console.log('[renderIngredientsTable] First ingredient catOptions length:', catOptions.length, 'storeOptions length:', storeOptions.length);
-      console.log('[renderIngredientsTable] catOptions preview:', catOptions.substring(0, 200));
-      console.log('[renderIngredientsTable] storeOptions preview:', storeOptions.substring(0, 200));
-    }
     return `
           <div class="item ingGrid" data-idx="${idx}">
             <div class="row">
@@ -2938,14 +2916,11 @@ if (mealPickerBack) {
       if (MP.mode === 'auto-fill') {
         const hiddenInput = document.getElementById('autoFillBreakfastRecipe');
         const selectionDiv = document.getElementById('autoFillBreakfastSelection');
-        console.log('[mealPickerBack] Auto-fill update. HiddenInput:', !!hiddenInput, 'SelectionDiv:', !!selectionDiv);
         if (hiddenInput) {
           hiddenInput.value = rid;
-          console.log('[mealPickerBack] Set hidden input value to:', rid);
         }
         if (selectionDiv) {
           selectionDiv.textContent = title;
-          console.log('[mealPickerBack] Set selection display to:', title);
         }
         closeMealPicker();
         return;
@@ -10092,20 +10067,15 @@ function bindUi() {
       const recipeId = pick.dataset.rid; // Corrected to match data-rid
       const fromDate = pick.dataset.fromdate;
       const fromSlot = pick.dataset.fromslot;
-      console.log('[leftoverList] Selecting:', recipeId, title, 'Mode:', MP.mode);
-
       if (MP.open) {
         if (MP.mode === 'auto-fill') {
           const hiddenInput = document.getElementById('autoFillBreakfastRecipe');
           const selectionDiv = document.getElementById('autoFillBreakfastSelection');
-          console.log('[leftoverList] Auto-fill update. Hidden:', !!hiddenInput, 'Div:', !!selectionDiv);
           if (hiddenInput) {
             hiddenInput.value = recipeId;
-            console.log('[leftoverList] Set hidden input value to:', recipeId);
           }
           if (selectionDiv) {
             selectionDiv.textContent = title;
-            console.log('[leftoverList] Set selection display to:', title);
           }
           closeModal('leftoverPickerBack');
           closeMealPicker();
@@ -10225,20 +10195,15 @@ function bindUi() {
     if (pick) {
       const recipeId = pick.dataset.rid;
       const title = pick.dataset.title;
-      console.log('[collectionRecipePickerList] Selecting:', recipeId, title, 'Mode:', MP.mode);
-
       if (MP.open) {
         if (MP.mode === 'auto-fill') {
           const hiddenInput = document.getElementById('autoFillBreakfastRecipe');
           const selectionDiv = document.getElementById('autoFillBreakfastSelection');
-          console.log('[collectionRecipePickerList] Auto-fill update. Hidden:', !!hiddenInput, 'Div:', !!selectionDiv);
           if (hiddenInput) {
             hiddenInput.value = recipeId;
-            console.log('[collectionRecipePickerList] Set hidden input value to:', recipeId);
           }
           if (selectionDiv) {
             selectionDiv.textContent = title;
-            console.log('[collectionRecipePickerList] Set selection display to:', title);
           }
           closeModal('collectionRecipePickerBack');
           closeMealPicker();
