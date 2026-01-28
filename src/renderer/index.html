@@ -388,85 +388,69 @@
       <div class="muted">Quick operations for managing multiple meals at once.</div>
       <div class="hr"></div>
 
-      <div class="row">
-        <div class="col-12">
-          <label>Copy Week</label>
-          <div class="actions">
-            <button class="ghost" id="btnCopyWeekForward" title="Copy this week's meals to next week">Copy This Week
-              →
-              Next Week</button>
-            <button class="ghost" id="btnCopyWeekBack" title="Copy this week's meals to previous week">Copy This
-              Week
-              → Previous Week</button>
-            <span class="muted" id="copyWeekStatus"></span>
+      <div class="col-12">
+        <label>Auto-Fill Breakfast</label>
+        <div class="actions" style="align-items:center; gap:12px;">
+          <button class="ghost" id="btnChooseAutoFillBreakfast">Choose Recipe</button>
+          <div id="autoFillBreakfastSelection"
+            style="background:var(--card-alt); padding:6px 12px; border-radius:6px; border:1px solid var(--line); font-size:13px; min-width:200px;">
+            No recipe selected
           </div>
+          <input type="hidden" id="autoFillBreakfastRecipe">
+          <button class="ghost" id="btnAutoFillBreakfast">Auto-Fill Empty Breakfasts</button>
+          <span class="muted" id="autoFillStatus"></span>
         </div>
+      </div>
 
-        <div class="col-12">
-          <label>Auto-Fill Breakfast</label>
-          <div class="actions" style="align-items:flex-start;">
-            <div style="position:relative; width:300px;">
-              <input type="text" id="autoFillBreakfastSearch" placeholder="Search breakfast recipes..."
-                style="width:100%; padding:8px; box-sizing:border-box;">
-              <div id="autoFillBreakfastDropdown"
-                style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--card); border:1px solid var(--line); border-radius:8px; max-height:200px; overflow-y:auto; z-index:10; margin-top:4px;">
-              </div>
-              <input type="hidden" id="autoFillBreakfastRecipe">
-            </div>
-            <button class="ghost" id="btnAutoFillBreakfast">Auto-Fill Empty Breakfasts</button>
-            <span class="muted" id="autoFillStatus"></span>
+      <div class="col-12">
+        <label>Meal Pattern Templates</label>
+        <div class="actions">
+          <button class="ghost" id="btnSaveMealPattern">Save Current Week as Template</button>
+          <button class="ghost" id="btnLoadMealPattern">Load Template</button>
+          <span class="muted" id="templateStatus"></span>
+        </div>
+      </div>
+
+      <!-- PHASE 6.2: Export Meal Plan -->
+      <div class="col-12">
+        <div class="hr"></div>
+        <label>📥 Export Meal Plan</label>
+        <div class="muted" style="margin-bottom:12px;">Export your meal plan for a date range to JSON format</div>
+        <div class="actions">
+          <button class="export-btn" id="btnExportMealPlan">Export Current Date Range</button>
+          <span class="muted" id="exportMealPlanStatus"></span>
+        </div>
+      </div>
+
+      <div class="col-12">
+        <div class="hr"></div>
+        <label>🤖 Smart Weekly Meal Planner</label>
+        <div class="muted" style="margin-bottom:12px;">Automatically generate a balanced week of meals based on
+          your
+          preferences</div>
+
+        <div class="row" style="margin-bottom:12px;">
+          <div class="col-3">
+            <label>Start Date</label>
+            <input type="date" id="genStartDate">
           </div>
-        </div>
-
-        <div class="col-12">
-          <label>Meal Pattern Templates</label>
-          <div class="actions">
-            <button class="ghost" id="btnSaveMealPattern">Save Current Week as Template</button>
-            <button class="ghost" id="btnLoadMealPattern">Load Template</button>
-            <span class="muted" id="templateStatus"></span>
+          <div class="col-3">
+            <label>End Date</label>
+            <input type="date" id="genEndDate">
           </div>
-        </div>
-
-        <!-- PHASE 6.2: Export Meal Plan -->
-        <div class="col-12">
-          <div class="hr"></div>
-          <label>📥 Export Meal Plan</label>
-          <div class="muted" style="margin-bottom:12px;">Export your meal plan for a date range to JSON format</div>
-          <div class="actions">
-            <button class="export-btn" id="btnExportMealPlan">Export Current Date Range</button>
-            <span class="muted" id="exportMealPlanStatus"></span>
-          </div>
-        </div>
-
-        <div class="col-12">
-          <div class="hr"></div>
-          <label>🤖 Smart Weekly Meal Planner</label>
-          <div class="muted" style="margin-bottom:12px;">Automatically generate a balanced week of meals based on
-            your
-            preferences</div>
-
-          <div class="row" style="margin-bottom:12px;">
-            <div class="col-3">
-              <label>Start Date</label>
-              <input type="date" id="genStartDate">
-            </div>
-            <div class="col-3">
-              <label>End Date</label>
-              <input type="date" id="genEndDate">
-            </div>
-            <div class="col-6">
-              <label>Actions</label>
-              <div class="actions">
-                <button class="primary" id="btnGenerateWeek"
-                  style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">✨ Generate This
-                  Week</button>
-                <button class="ghost" id="btnMealPlannerSettings">⚙️ Preferences</button>
-                <span class="muted" id="generateWeekStatus"></span>
-              </div>
+          <div class="col-6">
+            <label>Actions</label>
+            <div class="actions">
+              <button class="primary" id="btnGenerateWeek"
+                style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">✨ Generate This
+                Week</button>
+              <button class="ghost" id="btnMealPlannerSettings">⚙️ Preferences</button>
+              <span class="muted" id="generateWeekStatus"></span>
             </div>
           </div>
         </div>
       </div>
+    </div>
     </div>
 
     <div class="card">
@@ -800,14 +784,7 @@
 
         <!-- PHASE 2.4: View Toggle -->
         <div style="display:flex; gap:12px; align-items:center;">
-          <div class="view-toggle">
-            <button class="view-toggle-btn active" id="viewCollectionsCard" title="Card view">
-              <span>⊞</span> Cards
-            </button>
-            <button class="view-toggle-btn" id="viewCollectionsList" title="List view">
-              <span>☰</span> List
-            </button>
-          </div>
+
           <button class="primary" id="btnCreateCollection">Create Collection</button>
         </div>
       </div>
@@ -1587,10 +1564,14 @@
           <div class="muted" id="rmSub">View/Edit recipe + instructions + ingredients.</div>
         </div>
         <div class="actions">
-          <button class="ghost" onclick="sendRecipeToiPad(document.getElementById('recipeModalBack').dataset.recipeId)"
+          <button class="ghost" id="btnModalFavorite" title="Toggle Favorite">☆</button>
+          <button class="ghost" id="btnModalSendToIpad"
+            onclick="sendRecipeToiPad(document.getElementById('recipeModalBack').dataset.recipeId)"
             title="Send to iPad (Instant Open)">📱 Send to iPad</button>
           <button class="ghost" id="btnModalPrintRecipe">🖨️ Print</button>
           <button class="ghost" id="btnModalToggleEdit">Edit</button>
+          <button class="primary" id="btnSaveRecipeFull" style="display:none;">Save Recipe</button>
+          <button class="danger" id="btnDeleteRecipe" style="display:none;">Delete Recipe</button>
           <button class="ghost" id="btnModalClose">Close</button>
         </div>
       </div>
@@ -1675,9 +1656,7 @@
 
       <div class="hr"></div>
 
-      <div class="actions" id="modalActions">
-        <button class="primary" id="btnSaveRecipeFull">Save Recipe + Ingredients</button>
-        <button class="danger" id="btnDeleteRecipe">Delete Recipe</button>
+      <div class="actions" id="modalActions" style="display:none;">
         <span class="muted" id="rmStatus"></span>
       </div>
 

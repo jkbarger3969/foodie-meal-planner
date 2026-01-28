@@ -591,16 +591,16 @@ function _deductFromPantry_(ingredientLower, requiredQty, baseUnit) {
 
   // Determine the reason for any remaining undeducted amount
   if (deductedTotalBase === 0 && hasUnitMismatch) {
-    return { 
-      deducted: 0, 
-      reason: 'unit_mismatch', 
-      details: `Cannot convert between ${bu} and ${pantryUnits.join('/')}` 
+    return {
+      deducted: 0,
+      reason: 'unit_mismatch',
+      details: `Cannot convert between ${bu} and ${pantryUnits.join('/')}`
     };
   } else if (remainingNeedBase > 0 && deductedTotalBase > 0) {
-    return { 
-      deducted: deductedTotalBase, 
-      reason: 'partial', 
-      details: `Only ${deductedTotalBase} ${bu} available in pantry` 
+    return {
+      deducted: deductedTotalBase,
+      reason: 'partial',
+      details: `Only ${deductedTotalBase} ${bu} available in pantry`
     };
   } else if (deductedTotalBase === 0) {
     return { deducted: 0, reason: 'insufficient' };
@@ -870,7 +870,7 @@ async function handleApiCall({ fn, payload, store }) {
       case 'returnItemToPantry': return returnItemToPantry(payload);
       case 'markShoppingItemPurchased': return markShoppingItemPurchased(payload);
 
-      case 'updateShoppingItem': 
+      case 'updateShoppingItem':
         // Handle both use cases: ingredient normalization OR purchase status update
         if (payload && payload.newName && payload.sourceIds) {
           return updateIngredientNormalization(payload);
@@ -1114,6 +1114,11 @@ function listRecipesAll(payload) {
     params.mealType = payload.mealType;
   }
 
+  // Filter to show only recipes that are in AT LEAST ONE collection
+  if (payload && payload.onlyCollected) {
+    where += " AND r.RecipeId IN (SELECT DISTINCT recipe_id FROM recipe_collection_map)";
+  }
+
   let favoriteSelect = "0 AS is_favorite";
   let favoriteJoin = "";
   if (userId) {
@@ -1130,11 +1135,12 @@ function listRecipesAll(payload) {
   }
 
   rows = db().prepare(
-    `SELECT r.RecipeId, r.Title, r.TitleLower, r.URL, r.Cuisine, r.MealType, r.Notes, r.Instructions, r.Image_Name, ${favoriteSelect} ` +
+    `SELECT r.RecipeId, r.Title, r.TitleLower, r.URL, r.Cuisine, r.MealType, r.Notes, r.Instructions, r.Image_Name, 0 AS IsMainDish, ${favoriteSelect} ` +
     `FROM recipes r ${favoriteJoin} ` +
     `WHERE ${where} ` +
     `ORDER BY r.TitleLower ASC, r.RecipeId ASC`
   ).all(params);
+
   return ok_({ recipes: rows });
 }
 
@@ -2591,14 +2597,14 @@ function buildShoppingList(payload) {
   // Load pantry items for matching
   const hasQtyNum = pantryHasCol_('QtyNum');
   const hasUnit = pantryHasCol_('Unit');
-  
+
   // Build a map of pantry items for fast lookup using canonical keys for consistency
   const pantryMap = new Map();
   try {
     const cols = ['ItemId', 'Name', 'NameLower', 'QtyText'];
     if (hasQtyNum) cols.push('QtyNum');
     if (hasUnit) cols.push('Unit');
-    
+
     const pantryRows = db().prepare(`SELECT ${cols.join(', ')} FROM pantry`).all();
     for (const row of pantryRows) {
       // Use getCanonicalKey for consistency with ingredient aggregation
@@ -2615,7 +2621,7 @@ function buildShoppingList(payload) {
   // Process each item and subtract from pantry
   for (const group of groups) {
     const filteredItems = [];
-    
+
     for (const item of group.Items) {
       // Use getCanonicalKey to match pantry - ensures "mayo" matches "mayonnaise"
       const ingredientKey = getCanonicalKey(item.IngredientNorm);
@@ -2646,7 +2652,7 @@ function buildShoppingList(payload) {
       // Calculate net needed
       if (requiredQty !== null && Number.isFinite(requiredQty) && requiredQty > 0 && totalPantryQty > 0) {
         const netNeeded = requiredQty - totalPantryQty;
-        
+
         if (netNeeded <= 0) {
           // Fully covered by pantry - SKIP this item
           pantryDeductions.push({
@@ -2671,10 +2677,10 @@ function buildShoppingList(payload) {
           });
         }
       }
-      
+
       filteredItems.push(item);
     }
-    
+
     group.Items = filteredItems;
   }
 
@@ -2824,7 +2830,7 @@ function markMealCooked(payload) {
 
     // Deduct from pantry (only if pantry item exists)
     const deductResult = _deductFromPantry_(ingredientNorm, qtyNum, unit || 'piece');
-    
+
     if (deductResult.deducted > 0) {
       deducted.push({
         ingredient: ingredientNorm,
@@ -2841,8 +2847,8 @@ function markMealCooked(payload) {
         'insufficient': 'insufficient quantity in pantry',
         'invalid_input': 'invalid quantity'
       };
-      skipped.push({ 
-        ingredient: ingredientNorm, 
+      skipped.push({
+        ingredient: ingredientNorm,
         reason: reasonMessages[deductResult.reason] || deductResult.reason,
         details: deductResult.details || null
       });
@@ -3710,21 +3716,25 @@ function listCollectionRecipes(payload) {
 function setMainDishInCollection(payload) {
   const collectionId = String(payload && payload.collectionId || '').trim();
   const recipeId = String(payload && payload.recipeId || '').trim();
+  const isMainDish = payload && payload.isMainDish !== undefined ? (payload.isMainDish ? 1 : 0) : 1;
+
   if (!collectionId || !recipeId) return err_('collectionId and recipeId required.');
 
-  // Set all recipes in collection to is_main_dish = 0
-  db().prepare(`
-    UPDATE recipe_collection_map 
-    SET is_main_dish = 0 
-    WHERE collection_id = ?
-  `).run(collectionId);
+  if (isMainDish) {
+    // If setting as main dish, clear other main dishes first
+    db().prepare(`
+      UPDATE recipe_collection_map 
+      SET is_main_dish = 0 
+      WHERE collection_id = ?
+    `).run(collectionId);
+  }
 
-  // Set the selected recipe to is_main_dish = 1
+  // Set the selected recipe's main dish status
   db().prepare(`
     UPDATE recipe_collection_map 
-    SET is_main_dish = 1 
+    SET is_main_dish = ? 
     WHERE collection_id = ? AND recipe_id = ?
-  `).run(collectionId, recipeId);
+  `).run(isMainDish, collectionId, recipeId);
 
   return ok_({});
 }

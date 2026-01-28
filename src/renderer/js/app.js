@@ -669,7 +669,7 @@ let CURRENT_COLLECTION_ID = '';
 let COLLECTION_RECIPES = [];
 
 // ========== PHASE 2.4: Collection View Mode ==========
-let COLLECTION_VIEW_MODE = 'card'; // 'card' or 'list'
+
 
 // Phase 3: Grid view drag state
 let DRAG_SOURCE = null;
@@ -987,7 +987,7 @@ async function ensureTabLoaded(tabName) {
     case 'recipes':
       if (!TAB_LOADED.recipes || document.getElementById('recipesList').children.length === 0) {
         await resetAndLoadRecipes();
-        populateBreakfastRecipeDropdown();
+
         TAB_LOADED.recipes = true;
       }
       break;
@@ -1154,7 +1154,7 @@ async function resetAndLoadRecipes() {
     }
 
     renderRecipes();
-    populateBreakfastRecipeDropdown();
+
 
     // Update status - use filtered count from VIRTUAL_SCROLL, not total RECIPES.length
     const filteredCount = VIRTUAL_SCROLL.totalItems || RECIPES.length;
@@ -1202,6 +1202,16 @@ function updateRecipeCard(recipeId, updates) {
       if (imgEl) imgEl.style.backgroundImage = `url('${getRecipeImageUrl(updates.Image_Name)}')`;
     }
   });
+
+  // Also update modal favorite button if open
+  if (updates.is_favorite !== undefined && CURRENT_RECIPE_ID === recipeId) {
+    const favBtn = document.getElementById('btnModalFavorite');
+    if (favBtn) {
+      favBtn.innerHTML = updates.is_favorite ? '★' : '☆';
+      favBtn.style.color = updates.is_favorite ? '#ffd700' : 'var(--muted)';
+      favBtn.title = updates.is_favorite ? 'Remove from favorites' : 'Add to favorites';
+    }
+  }
 }
 
 async function toggleRecipeFavorite(rid) {
@@ -1686,13 +1696,23 @@ function setRecipeModalMode(mode) {
     if (el) el.disabled = !editable;
   });
 
-  document.getElementById('modalActions').style.display = editable ? '' : 'none';
+  const btnSave = document.getElementById('btnSaveRecipeFull');
+  const btnDelete = document.getElementById('btnDeleteRecipe');
+
+  if (btnSave) btnSave.style.display = editable ? '' : 'none';
+  if (btnDelete) btnDelete.style.display = editable ? '' : 'none';
+
+  document.getElementById('modalActions').style.display = 'none'; // Always hidden now, buttons moved to header
   document.getElementById('viewModeActions').style.display = editable ? 'none' : '';
 
   const btnPrint = document.getElementById('btnModalPrintRecipe');
-  if (btnPrint) {
-    btnPrint.style.display = (mode === 'new') ? 'none' : '';
-  }
+  const btnSendToIpad = document.getElementById('btnModalSendToIpad');
+  const btnFavorite = document.getElementById('btnModalFavorite');
+
+  if (btnPrint) btnPrint.style.display = editable ? 'none' : '';
+  if (btnSendToIpad) btnSendToIpad.style.display = editable ? 'none' : '';
+  if (btnFavorite) btnFavorite.style.display = editable ? 'none' : '';
+
 
   const url = (document.getElementById('rUrl').value || '').trim();
   document.getElementById('rUrlView').innerHTML = url ? `<a href="${escapeAttr(url)}" target="_blank" rel="noreferrer">Open recipe link</a>` : '';
@@ -2056,6 +2076,15 @@ window.openRecipeModalView = async function (recipeId) {
 
     // ========== PHASE 3.1: Add to recent history ==========
     addToRecentRecipes(r.RecipeId, r.Title, r.Cuisine, r.MealType);
+
+    // Set favorite button state
+    const favBtn = document.getElementById('btnModalFavorite');
+    if (favBtn) {
+      const isFav = (r.IsFavorite === true || r.IsFavorite === 1 || r.IsFavorite === '1');
+      favBtn.innerHTML = isFav ? '★' : '☆';
+      favBtn.style.color = isFav ? '#ffd700' : 'var(--muted)';
+      favBtn.title = isFav ? 'Remove from favorites' : 'Add to favorites';
+    }
   } catch (err) {
     console.error('[openRecipeModalView] Error:', err);
     showToast('Error loading recipe', 'error');
@@ -2621,27 +2650,7 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
-  const toggleMainDish = e.target.closest('[data-action="toggle-main-dish"]');
-  if (toggleMainDish) {
-    const recipeId = toggleMainDish.getAttribute('data-rid');
-    const isChecked = toggleMainDish.checked;
-
-    if (recipeId && CURRENT_COLLECTION_ID) {
-      const res = await api('setMainDishInCollection', {
-        collectionId: CURRENT_COLLECTION_ID,
-        recipeId: recipeId,
-        isMainDish: isChecked
-      });
-
-      if (res.ok) {
-        await loadCollectionRecipes(CURRENT_COLLECTION_ID);
-        await updatePlannerForCollection(CURRENT_COLLECTION_ID);
-      } else {
-        showToast(res.error || 'Failed to update main dish', 'error');
-      }
-    }
-    return;
-  }
+  /* Conflicting global handler removed - handled by specific change listener */
 
   const ir = e.target.closest('[data-action="ing-del"]');
   if (ir) { if (recipeModalMode === 'view') return; removeIngredientRow(Number(ir.getAttribute('data-idx'))); return; }
@@ -2749,17 +2758,25 @@ document.addEventListener('change', (e) => {
 
 // ---------- meal picker ----------
 
-function openMealPicker(date, slot) {
-  MP = { open: true, date, slot, q: '', recipes: [], selectedUserIds: new Set() };
-  document.getElementById('mpTitle').textContent = `Select a recipe for ${slot}`;
-  document.getElementById('mpSub').textContent = `Date: ${date}`;
+function openMealPicker(date, slot, mode = 'normal') {
+  MP = { open: true, date, slot, q: '', recipes: [], selectedUserIds: new Set(), mode };
+  document.getElementById('mpTitle').textContent = mode === 'auto-fill' ? 'Select a Breakfast Recipe' : `Select a recipe for ${slot}`;
+  document.getElementById('mpSub').textContent = mode === 'auto-fill' ? 'This recipe will be used to auto-fill empty breakfast slots' : `Date: ${date}`;
   document.getElementById('mpSearch').value = '';
   document.getElementById('mpStatus').textContent = '';
   document.getElementById('mpList').innerHTML = '';
   openModal('mealPickerBack');
 
+  // Hide assignment editor if in auto-fill mode
+  const editorBox = document.getElementById('mpAssignmentEditor');
+  if (editorBox) {
+    editorBox.style.display = mode === 'auto-fill' ? 'none' : '';
+  }
+
   // PHASE 4.5.5: Load meal assignment editor
-  renderMealAssignmentEditor(date, slot);
+  if (mode !== 'auto-fill') {
+    renderMealAssignmentEditor(date, slot);
+  }
 
   mealPickerLoad(true);
 }
@@ -2913,9 +2930,26 @@ if (mealPickerBack) {
     }
 
     const pick = e.target.closest('[data-action="mp-select"]');
-    if (pick) {
+    if (pick && MP.open) {
       const rid = pick.getAttribute('data-rid');
       const title = pick.getAttribute('data-title');
+      console.log('[mealPickerBack] Selecting recipe:', rid, title, 'Mode:', MP.mode);
+
+      if (MP.mode === 'auto-fill') {
+        const hiddenInput = document.getElementById('autoFillBreakfastRecipe');
+        const selectionDiv = document.getElementById('autoFillBreakfastSelection');
+        console.log('[mealPickerBack] Auto-fill update. HiddenInput:', !!hiddenInput, 'SelectionDiv:', !!selectionDiv);
+        if (hiddenInput) {
+          hiddenInput.value = rid;
+          console.log('[mealPickerBack] Set hidden input value to:', rid);
+        }
+        if (selectionDiv) {
+          selectionDiv.textContent = title;
+          console.log('[mealPickerBack] Set selection display to:', title);
+        }
+        closeMealPicker();
+        return;
+      }
 
       // Phase 4.5.7: Use upsertUserPlanMeal for multi-user support
       // Get active user ID
@@ -6616,17 +6650,18 @@ async function renderPlanGrid() {
           const recipe = RECIPES.find(r => r.RecipeId === meal.RecipeId);
           const cuisine = recipe ? recipe.Cuisine : '';
           const cuisineClass = cuisine ? `cuisine-${cuisine.toLowerCase().replace(/\s+/g, '-')}` : '';
+          const isLeftover = !!(meal.UseLeftovers === true || meal.UseLeftovers === 1 || meal.UseLeftovers === 'true');
 
           html += `
-                <div class="grid-meal ${slotClass} ${cuisineClass}" 
+                <div class="grid-meal ${slotClass} ${cuisineClass} ${isLeftover ? 'leftover-meal' : ''}" 
                      draggable="true"
                      data-date="${dateKey}" 
                      data-slot="${slot}"
                      data-rid="${escapeAttr(meal.RecipeId || '')}"
                      data-title="${escapeAttr(meal.Title)}"
                      ${hasAdditional ? `data-has-additional="true" data-additional-count="${slotAdditionalItems.length}"` : ''}>
-                  <div class="grid-meal-label">${slot.charAt(0)}</div>
-                  <div class="grid-meal-title">${escapeHtml(meal.Title)}</div>
+                  <div class="grid-meal-label">${slot.charAt(0)}${isLeftover ? ' ↺' : ''}</div>
+                  <div class="grid-meal-title">${escapeHtml(meal.Title)}${isLeftover ? '<span class="leftover-indicator"> (Leftovers)</span>' : ''}</div>
                   ${hasAdditional ? `
                     <div class="grid-additional-badge">+${slotAdditionalItems.length}</div>
                     <button class="grid-expand-btn" title="Show additional items" data-date="${dateKey}" data-slot="${slot}">
@@ -6946,49 +6981,66 @@ function setupGridDragAndDrop() {
   });
 }
 
-function openLeftoverPicker() {
-  if (!MP.open || !MP.date) return;
-
-  const targetDate = new Date(MP.date);
-  const meals = [];
-
-  for (let i = 1; i <= 3; i++) {
-    const pastDate = ymd(new Date(targetDate.getTime() - i * 24 * 60 * 60 * 1000));
-    const plan = PLAN.plansByDate[pastDate];
-    if (plan) {
-      ['Dinner', 'Lunch', 'Breakfast'].forEach(slot => {
-        const slotMeals = plan[slot];
-        // Handle both array (multi-user) and single object (legacy) formats
-        const mealsArray = Array.isArray(slotMeals) ? slotMeals : (slotMeals ? [slotMeals] : []);
-
-        for (const m of mealsArray) {
-          if (m && m.Title && m.RecipeId) {
-            meals.push({
-              date: pastDate,
-              slot,
-              title: m.Title,
-              recipeId: m.RecipeId,
-              userName: m.userName || ''
-            });
-          }
-        }
-      });
-    }
-  }
+async function openLeftoverPicker() {
+  console.log('[openLeftoverPicker] Called. MP:', JSON.stringify(MP));
+  if (!MP.open) { console.warn('[openLeftoverPicker] MP not open'); return; }
+  if (MP.mode !== 'auto-fill' && !MP.date) { console.warn('[openLeftoverPicker] No date and not auto-fill'); return; }
 
   const container = document.getElementById('leftoverList');
+  container.innerHTML = '<div class="muted">Searching past meals...</div>';
+  openModal('leftoverPickerBack');
+
+  const targetDateYmd = MP.date || ymd(new Date());
+  const start = addDays(targetDateYmd, -7); // Look back 7 days to be safe
+  const end = addDays(targetDateYmd, -1);
+
+  const meals = [];
+  try {
+    const activeUserRes = await api('getActiveUser');
+    const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
+
+    const res = await api('getUserPlanMeals', { userId, start, end });
+    if (res.ok && res.plans) {
+      res.plans.forEach(plan => {
+        ['Dinner', 'Lunch', 'Breakfast'].forEach(slot => {
+          const slotData = plan[slot];
+          // Handle both array (multi-user) and single object (legacy) formats
+          const slotMeals = Array.isArray(slotData) ? slotData : (slotData && slotData.RecipeId ? [slotData] : []);
+          slotMeals.forEach(m => {
+            if (m && m.Title && m.RecipeId) {
+              meals.push({
+                date: plan.Date,
+                slot,
+                title: m.Title,
+                recipeId: m.RecipeId,
+                userName: m.userName || ''
+              });
+            }
+          });
+        });
+      });
+    }
+  } catch (err) {
+    console.error('Failed to fetch past meals:', err);
+  }
+
   if (!meals.length) {
-    container.innerHTML = '<div class="muted">No meals found in past 3 days</div>';
+    container.innerHTML = '<div class="muted">No meals found in the past week</div>';
   } else {
+    // Show newest first
+    meals.reverse();
     container.innerHTML = meals.map(m => `
           <div class="item" data-action="pick-leftover" 
                data-title="${escapeAttr(m.title)}"
-               data-recipeid="${escapeAttr(m.recipeId)}"
+                data-rid="${escapeAttr(m.recipeId)}"
                data-fromdate="${escapeAttr(m.date)}"
                data-fromslot="${escapeAttr(m.slot)}"
-               style="cursor:pointer;">
-            <strong>${escapeHtml(m.title)}</strong>
-            <div class="muted">${m.date} ${m.slot}${m.userName ? ` (${m.userName})` : ''}</div>
+               style="cursor:pointer; display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid var(--line);">
+            <div style="flex:1;">
+              <strong style="display:block; margin-bottom:2px;">${escapeHtml(m.title)}</strong>
+              <div class="muted" style="font-size:11px;">${m.date} • ${m.slot}</div>
+            </div>
+            <button class="primary mini" style="padding: 4px 8px; font-size:11px;">Select</button>
           </div>
         `).join('');
   }
@@ -6998,10 +7050,23 @@ function openLeftoverPicker() {
 
 // Collection Recipe Picker for Meal Planner
 function openCollectionRecipePicker() {
-  if (!MP.open || !MP.date) return;
+  console.log('[openCollectionRecipePicker] Called. MP:', JSON.stringify(MP), 'COLLECTIONS:', COLLECTIONS.length);
+  if (!MP.open) { console.warn('[openCollectionRecipePicker] MP not open'); return; }
+  if (MP.mode !== 'auto-fill' && !MP.date) { console.warn('[openCollectionRecipePicker] No date and not auto-fill'); return; }
+
+  // Ensure collections are loaded
+  if (COLLECTIONS.length === 0) {
+    console.log('[openCollectionRecipePicker] COLLECTIONS empty, reloading...');
+    loadCollections().then(() => {
+      const select = document.getElementById('collectionRecipePickerSelect');
+      select.innerHTML = '<option value="">-- Choose a collection --</option>' +
+        COLLECTIONS.map(c => `<option value="${escapeAttr(c.CollectionId)}">${escapeHtml(c.Name)}</option>`).join('');
+    });
+  }
 
   // Populate collection dropdown
   const select = document.getElementById('collectionRecipePickerSelect');
+  console.log('[openCollectionRecipePicker] Populating select with', COLLECTIONS.length, 'collections');
   select.innerHTML = '<option value="">-- Choose a collection --</option>' +
     COLLECTIONS.map(c => `<option value="${escapeAttr(c.CollectionId)}">${escapeHtml(c.Name)}</option>`).join('');
 
@@ -7028,15 +7093,61 @@ async function loadCollectionRecipesForPicker(collectionId) {
   }
 
   const recipes = res.recipes;
-  container.innerHTML = recipes.map(r => `
+  const mainDish = recipes.find(r => r.IsMainDish);
+  const sideDishes = recipes.filter(r => !r.IsMainDish);
+
+  // Build HTML with "Use Entire Collection" button first
+  let html = '';
+
+  if (mainDish && sideDishes.length > 0) {
+    html += `
+      <div class="item" style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%); border-color: rgba(102, 126, 234, 0.4); margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+          <div style="flex: 1; min-width: 200px;">
+            <strong style="font-size: 14px; color: var(--accent);">Use Entire Collection</strong>
+            <div class="muted" style="margin-top: 4px;">
+              Main: <strong>${escapeHtml(mainDish.Title)}</strong><br>
+              + ${sideDishes.length} side dish${sideDishes.length > 1 ? 'es' : ''}: ${sideDishes.map(r => r.Title).join(', ')}
+            </div>
+          </div>
+          <button class="primary" data-action="use-entire-collection" 
+                  data-collection-id="${escapeAttr(collectionId)}"
+                  style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); white-space: nowrap;">
+            Add All to Meal
+          </button>
+        </div>
+      </div>
+      <div class="hr" style="margin: 16px 0;"></div>
+      <div class="muted" style="margin-bottom: 8px; font-size: 12px;">Or select individual recipe:</div>
+    `;
+  } else if (!mainDish && recipes.length > 0) {
+    html += `
+      <div class="item" style="background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.3); margin-bottom: 16px;">
+        <div class="muted" style="color: var(--warning);">
+          <strong>Tip:</strong> Set a main dish in this collection to use "Add All to Meal" feature.
+          Go to Collections tab and use the dropdown next to each recipe to mark one as "Main Dish".
+        </div>
+      </div>
+    `;
+  }
+
+  // Add individual recipes
+  html += recipes.map(r => `
         <div class="item" data-action="pick-collection-recipe" 
              data-rid="${escapeAttr(r.RecipeId)}"
              data-title="${escapeAttr(r.Title)}"
              style="cursor:pointer;">
-          <strong>${escapeHtml(r.Title)}</strong>
-          <div class="muted">${escapeHtml(r.MealType || 'Any')} • ${escapeHtml(r.Cuisine || '')}</div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            ${r.IsMainDish ? '<span style="color: var(--accent); font-weight: 600;" title="Main Dish">★</span>' : '<span style="color: var(--muted);" title="Side Dish">○</span>'}
+            <div>
+              <strong>${escapeHtml(r.Title)}</strong>
+              <div class="muted">${escapeHtml(r.MealType || 'Any')} • ${escapeHtml(r.Cuisine || '')}${r.IsMainDish ? ' • Main Dish' : ''}</div>
+            </div>
+          </div>
         </div>
       `).join('');
+
+  container.innerHTML = html;
 }
 
 async function loadCollections() {
@@ -7045,6 +7156,8 @@ async function loadCollections() {
     COLLECTIONS = res.collections || [];
     renderCollections();
     updateCollectionFilter();
+    // Auto-load "All Recipes" (filtered by actual collection existence)
+    await loadCollectionRecipes('');
   }
 }
 
@@ -7072,104 +7185,7 @@ function renderCollections() {
     return;
   }
 
-  // ========== PHASE 2.4: Card View ==========
-  if (COLLECTION_VIEW_MODE === 'card') {
-    container.className = 'collections-grid';
-    container.innerHTML = COLLECTIONS.map(c => {
-      // Get first 4 recipe emojis/icons or use placeholders
-      const emojiMap = {
-        'Breakfast': '🍳',
-        'Brunch': '🥐',
-        'Lunch': '🥗',
-        'Dinner': '🍝',
-        'Side Dish': '🥔',
-        'Appetizer': '🍤',
-        'Snack': '🍿',
-        'Dessert': '🍰',
-        'Beverage': '☕',
-        'Italian': '🍕',
-        'Mexican': '🌮',
-        'Chinese': '🥡',
-        'Indian': '🍛',
-        'Japanese': '🍣',
-        'French': '🥖',
-        'American': '🍔',
-        'Thai': '🍜',
-        'Mediterranean': '🫒'
-      };
-
-      // Get cuisine-based emoji or default to recipe icon
-      const emoji = emojiMap[c.Cuisine] || emojiMap[c.MealType] || '🍽️';
-
-      // Show up to 4 thumbnails based on actual recipe count
-      const recipeCount = c.RecipeCount || 0;
-      const thumbs = [];
-
-      if (recipeCount === 0) {
-        // Show empty state
-        thumbs.push(`<div class="collection-thumb empty">📋</div>`);
-      } else if (recipeCount <= 3) {
-        // Show one emoji per recipe
-        for (let i = 0; i < recipeCount; i++) {
-          thumbs.push(`<div class="collection-thumb">${emoji}</div>`);
-        }
-      } else {
-        // Show 3 emojis + "+X more"
-        for (let i = 0; i < 3; i++) {
-          thumbs.push(`<div class="collection-thumb">${emoji}</div>`);
-        }
-        thumbs.push(`<div class="collection-thumb more">+${recipeCount - 3}</div>`);
-      }
-
-      return `
-            <div class="collection-card" data-cid="${escapeAttr(c.CollectionId)}" style="cursor: pointer;">
-              <div class="collection-thumbnails" data-action="view-collection" data-cid="${escapeAttr(c.CollectionId)}">
-                ${thumbs.join('')}
-              </div>
-              <div class="collection-card-content">
-                <h3 class="collection-card-title" data-action="view-collection" data-cid="${escapeAttr(c.CollectionId)}">${escapeHtml(c.Name)}</h3>
-                <div class="collection-card-meta">
-                  <div class="collection-card-meta-item">
-                    <span>📋</span>
-                    <span>${recipeCount} recipe${recipeCount === 1 ? '' : 's'}</span>
-                  </div>
-                </div>
-                ${c.Description ? `<div class="collection-card-description">${escapeHtml(c.Description)}</div>` : ''}
-                <div class="collection-card-actions">
-                  <button class="collection-card-action" data-action="view-collection" data-cid="${escapeAttr(c.CollectionId)}">
-                    View
-                  </button>
-                  <button class="collection-card-action" data-action="assign-recipes" data-cid="${escapeAttr(c.CollectionId)}">
-                    Edit
-                  </button>
-                  <button class="collection-card-action" data-action="export-collection" data-cid="${escapeAttr(c.CollectionId)}" style="background: rgba(34, 197, 94, 0.15); border-color: rgba(34, 197, 94, 0.3); color: #22c55e;">
-                    📥 Export
-                  </button>
-                  <div class="collection-assign-dropdown" style="position: relative; display: inline-block;">
-                    <button class="collection-card-action primary collection-assign-btn" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}">
-                      📅 Assign ▾
-                    </button>
-                    <div class="collection-assign-menu" style="display:none; position:absolute; top:100%; left:0; background:var(--card); border:1px solid var(--line); border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:180px; margin-top:4px;">
-                      <button class="collection-assign-option" data-action="assign-collection-to-planner" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}" style="display:block; width:100%; padding:10px 14px; border:none; background:none; text-align:left; cursor:pointer; color:var(--text); font-size:13px;">
-                        🍽️ Assign to Meal
-                      </button>
-                      <button class="collection-assign-option" data-action="assign-collection-to-day" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}" style="display:block; width:100%; padding:10px 14px; border:none; background:none; text-align:left; cursor:pointer; color:var(--text); font-size:13px; border-top:1px solid var(--line);">
-                        📆 Assign to Day
-                      </button>
-                      <button class="collection-assign-option" data-action="assign-collection-to-week" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}" style="display:block; width:100%; padding:10px 14px; border:none; background:none; text-align:left; cursor:pointer; color:var(--text); font-size:13px; border-top:1px solid var(--line);">
-                        📅 Assign to Week
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          `;
-    }).join('');
-    return;
-  }
-
-  // ========== Existing List View ==========
+  // ========== List View ==========
   container.className = 'list';
   container.innerHTML = COLLECTIONS.map(c => `
         <div class="item">
@@ -7181,8 +7197,8 @@ function renderCollections() {
             </div>
             <div class="actions">
               <button class="ghost" data-action="edit-collection" data-cid="${escapeAttr(c.CollectionId)}">Edit</button>
-              <button class="ghost" data-action="assign-recipes" data-cid="${escapeAttr(c.CollectionId)}">Assign Recipes</button>
-              <button class="ghost" data-action="export-collection" data-cid="${escapeAttr(c.CollectionId)}" style="background: rgba(34, 197, 94, 0.15); border-color: rgba(34, 197, 94, 0.3); color: #22c55e;">📥 Export</button>
+              <button class="ghost" data-action="assign-recipes" data-cid="${escapeAttr(c.CollectionId)}">Add Recipes</button>
+
               <div class="collection-assign-dropdown" style="position: relative; display: inline-block;">
                 <button class="primary collection-assign-btn" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">📅 Assign ▾</button>
                 <div class="collection-assign-menu" style="display:none; position:absolute; top:100%; right:0; background:var(--card); border:1px solid var(--line); border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.15); z-index:100; min-width:180px; margin-top:4px;">
@@ -7213,14 +7229,28 @@ function updateCollectionFilter() {
 async function loadCollectionRecipes(collectionId) {
   console.log('loadCollectionRecipes called with collectionId:', collectionId);
   CURRENT_COLLECTION_ID = collectionId;
-  const res = await api('listCollectionRecipes', { collectionId });
+  let res;
+  if (collectionId) {
+    res = await api('listCollectionRecipes', { collectionId });
+  } else {
+    // "All Recipes" selected
+    // "All Recipes" selected - passing onlyCollected: true to validte user request
+    res = await api('listRecipesAll', { onlyCollected: true });
+  }
   console.log('listCollectionRecipes result:', res);
   if (res.ok) {
     COLLECTION_RECIPES = res.recipes || [];
     console.log('COLLECTION_RECIPES set to:', COLLECTION_RECIPES);
+
+    // DEBUG: Alert the user to exact count
+    // alert(`DEBUG: Received ${COLLECTION_RECIPES.length} recipes for ${collectionId ? 'Collection ' + collectionId : 'All Recipes'}`);
+
     renderCollectionRecipes();
+    showToast(`Loaded ${COLLECTION_RECIPES.length} recipes`, 'success');
   } else {
     console.error('Failed to load collection recipes:', res.error);
+    // alert(`DEBUG: Failed to load: ${res.error}`);
+    showToast('Failed to load recipes: ' + (res.error || 'Unknown error'), 'error');
   }
 }
 
@@ -7282,7 +7312,7 @@ function renderCollectionRecipes() {
 
   const subtitleEl = document.getElementById('collectionRecipesSubtitle');
   if (subtitleEl) {
-    subtitleEl.textContent = collection ? `Recipes in "${collection.Name}"` : 'Select a collection';
+    subtitleEl.textContent = collection ? `Recipes in "${collection.Name}"` : 'All Recipes';
   }
 
   if (!COLLECTION_RECIPES.length) {
@@ -7292,17 +7322,22 @@ function renderCollectionRecipes() {
   }
 
   console.log('Rendering', COLLECTION_RECIPES.length, 'recipes');
-  container.innerHTML = COLLECTION_RECIPES.map(r => `
+  const isAllRecipes = !CURRENT_COLLECTION_ID;
+
+  try {
+    container.innerHTML = COLLECTION_RECIPES.map(r => `
         <div class="item">
           <div style="display:flex; justify-content:space-between; gap:10px; align-items:start;">
             <div style="display:flex; align-items:center; gap:12px; flex:1;">
               <div style="display:flex; flex-direction:column; gap:2px;">
-                <label style="font-size:11px; color:var(--muted); font-weight:600;">Meal Role</label>
+                <label style="font-size:11px; color:var(--muted); font-weight:600; opacity:${isAllRecipes ? 0.5 : 1};">Meal Role</label>
                 <select 
                        class="collection-role-select"
                        data-action="toggle-main-dish" 
                        data-rid="${escapeAttr(r.RecipeId)}"
-                       style="padding:4px 8px; border-radius:6px; border:1px solid var(--line); font-size:12px; background:var(--card); color:var(--text); cursor:pointer;">
+                       data-cid="${escapeAttr(CURRENT_COLLECTION_ID || '')}"
+                       style="padding:4px 8px; border-radius:6px; border:1px solid var(--line); font-size:12px; background:var(--card); color:var(--text); cursor:pointer;"
+                       ${isAllRecipes ? 'disabled' : ''}>
                   <option value="1" ${r.IsMainDish ? 'selected' : ''}>Main Dish</option>
                   <option value="0" ${!r.IsMainDish ? 'selected' : ''}>Side Dish</option>
                 </select>
@@ -7315,11 +7350,14 @@ function renderCollectionRecipes() {
             <div class="actions">
               <button class="ghost" data-action="recipe-view" data-rid="${escapeAttr(r.RecipeId)}">View</button>
               <button class="primary" data-action="assign-to-planner" data-rid="${escapeAttr(r.RecipeId)}" data-title="${escapeAttr(r.Title)}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">📅 Assign to Planner</button>
-              <button class="danger" data-action="remove-from-collection" data-rid="${escapeAttr(r.RecipeId)}">Remove</button>
             </div>
           </div>
         </div>
       `).join('');
+  } catch (err) {
+    console.error('Render Error:', err);
+    container.innerHTML = `<div class="error">Error rendering: ${err.message}</div>`;
+  }
   console.log('Rendered collection recipes HTML');
 }
 
@@ -7392,7 +7430,7 @@ async function confirmAssignToPlanner() {
     status.textContent = 'Assigned successfully!';
     await refreshDashboardIfToday(date); // Refresh dashboard if today's meal changed
     setTimeout(() => {
-      document.getElementById('assignToPlannerBack').style.display = 'none';
+      closeModal('assignToPlannerBack');
       // If user is on planner tab, reload it
       if (PLAN.start && PLAN.days) {
         loadPlansIntoUi(PLAN.start, PLAN.days);
@@ -7403,24 +7441,39 @@ async function confirmAssignToPlanner() {
   }
 }
 
+// Local state for the modal to avoid global pollution
+let MODAL_COLLECTION_IDS = new Set();
+
 async function openAssignRecipesModal() {
   console.log('openAssignRecipesModal called');
 
-  // Ensure recipes are loaded before showing the modal
+  // Ensure recipes are loaded
   if (!RECIPES || RECIPES.length === 0) {
     console.log('RECIPES empty, loading all recipes...');
     const res = await api('listRecipesAll', {});
     if (res.ok) {
       RECIPES = res.recipes || [];
       RECIPES.sort((a, b) => String(a.TitleLower || a.Title || '').localeCompare(String(b.TitleLower || b.Title || '')));
-      console.log('Loaded', RECIPES.length, 'recipes');
     } else {
-      console.error('Failed to load recipes:', res.error);
       showToast('Failed to load recipes', 'error');
       return;
     }
+  }
+
+  // Load the *specific* collection's recipes for this modal session
+  // We use a local fetch so we don't mess with the main view's COLLECTION_RECIPES if the user is just browsing
+  if (CURRENT_COLLECTION_ID) {
+    console.log('Fetching modal-specific recipe list for:', CURRENT_COLLECTION_ID);
+    const res = await api('listCollectionRecipes', { collectionId: CURRENT_COLLECTION_ID });
+    if (res.ok) {
+      const recipes = res.recipes || [];
+      MODAL_COLLECTION_IDS = new Set(recipes.map(r => r.RecipeId));
+      console.log('Modal loaded IDs:', MODAL_COLLECTION_IDS.size);
+    } else {
+      MODAL_COLLECTION_IDS = new Set();
+    }
   } else {
-    console.log('Using existing RECIPES array with', RECIPES.length, 'recipes');
+    MODAL_COLLECTION_IDS = new Set();
   }
 
   const collection = COLLECTIONS.find(c => c.CollectionId === CURRENT_COLLECTION_ID);
@@ -7433,26 +7486,20 @@ async function openAssignRecipesModal() {
 }
 
 function renderAssignRecipesList(query) {
-  console.log('renderAssignRecipesList called with query:', query);
   const container = document.getElementById('assignRecipesList');
-  console.log('Container:', container);
-  console.log('RECIPES length:', RECIPES.length);
-  const collectionRecipeIds = new Set((COLLECTION_RECIPES || []).map(r => r.RecipeId));
-  console.log('Collection recipe IDs:', collectionRecipeIds);
 
   let recipesToShow = RECIPES;
   if (query) {
+    const q = query.toLowerCase();
     recipesToShow = RECIPES.filter(r =>
-      (r.Title || '').toLowerCase().includes(query) ||
-      (r.Cuisine || '').toLowerCase().includes(query)
+      (r.Title || '').toLowerCase().includes(q) ||
+      (r.Cuisine || '').toLowerCase().includes(q)
     );
-    console.log('Filtered to', recipesToShow.length, 'recipes');
-  } else {
-    console.log('Showing all', recipesToShow.length, 'recipes');
   }
 
+  // Use the local Set we populated when opening the modal
   container.innerHTML = recipesToShow.map(r => {
-    const inCollection = collectionRecipeIds.has(r.RecipeId);
+    const inCollection = MODAL_COLLECTION_IDS.has(r.RecipeId);
     return `
           <div class="item">
             <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
@@ -7473,67 +7520,7 @@ function renderAssignRecipesList(query) {
   console.log('Rendered', recipesToShow.length, 'recipes to container');
 }
 
-function populateBreakfastRecipeDropdown() {
-  // This function now handles the searchable dropdown
-  const searchInput = document.getElementById('autoFillBreakfastSearch');
-  const dropdown = document.getElementById('autoFillBreakfastDropdown');
-  const hiddenInput = document.getElementById('autoFillBreakfastRecipe');
 
-  if (!searchInput || !dropdown || !hiddenInput) return;
-
-  const breakfastRecipes = RECIPES.filter(r =>
-    (r.MealType || '').toLowerCase().includes('breakfast') ||
-    (r.MealType || '').toLowerCase() === 'any'
-  );
-
-  searchInput.addEventListener('input', (e) => {
-    const query = e.target.value.trim().toLowerCase();
-
-    if (!query) {
-      dropdown.style.display = 'none';
-      return;
-    }
-
-    const filtered = breakfastRecipes.filter(r =>
-      (r.Title || '').toLowerCase().includes(query)
-    );
-
-    if (!filtered.length) {
-      dropdown.innerHTML = '<div style="padding:8px; color:var(--muted);">No recipes found</div>';
-      dropdown.style.display = 'block';
-      return;
-    }
-
-    dropdown.innerHTML = filtered.map(r => `
-          <div class="item" data-action="select-breakfast-recipe" data-rid="${escapeAttr(r.RecipeId)}" data-title="${escapeAttr(r.Title)}"
-               style="cursor:pointer; padding:8px; border-bottom:1px solid var(--line);">
-            ${escapeHtml(r.Title)}
-          </div>
-        `).join('');
-    dropdown.style.display = 'block';
-  });
-
-  searchInput.addEventListener('blur', () => {
-    setTimeout(() => {
-      dropdown.style.display = 'none';
-    }, 200);
-  });
-
-  searchInput.addEventListener('focus', (e) => {
-    if (e.target.value.trim()) {
-      e.target.dispatchEvent(new Event('input'));
-    }
-  });
-
-  dropdown.addEventListener('click', (e) => {
-    const select = e.target.closest('[data-action="select-breakfast-recipe"]');
-    if (select) {
-      hiddenInput.value = select.dataset.rid;
-      searchInput.value = select.dataset.title;
-      dropdown.style.display = 'none';
-    }
-  });
-}
 
 // ============ IMPORT RECIPE FROM URL ============
 function openImportRecipeModal() {
@@ -7561,7 +7548,7 @@ function openImportRecipeModal() {
 }
 
 function closeImportRecipeModal() {
-  document.getElementById('importRecipeModalBack').style.display = 'none';
+  closeModal('importRecipeModalBack');
 }
 
 async function fetchRecipeFromUrl() {
@@ -7798,7 +7785,7 @@ function openMealPlannerPrefs() {
 
 // Close preferences modal
 function closeMealPlannerPrefs() {
-  document.getElementById('mealPlannerPrefsBack').style.display = 'none';
+  closeModal('mealPlannerPrefsBack');
 }
 
 // Save preferences from modal
@@ -8967,7 +8954,21 @@ function bindUi() {
   safeBind('mpList', 'click', async (e) => {
     const sel = e.target.closest('[data-action="mp-select"]');
     if (!sel || !MP.open) return;
-    const meal = { RecipeId: sel.dataset.rid, Title: sel.dataset.title };
+
+    const rid = sel.dataset.rid;
+    const title = sel.dataset.title;
+
+    // Handle auto-fill mode (for Auto Fill Breakfast feature)
+    if (MP.mode === 'auto-fill') {
+      const hiddenInput = document.getElementById('autoFillBreakfastRecipe');
+      const selectionDiv = document.getElementById('autoFillBreakfastSelection');
+      if (hiddenInput) hiddenInput.value = rid;
+      if (selectionDiv) selectionDiv.textContent = title;
+      closeMealPicker();
+      return;
+    }
+
+    const meal = { RecipeId: rid, Title: title };
     // Phase 4.5.7: Use upsertUserMeal helper
     await upsertUserMeal(MP.date, MP.slot, meal);
     closeMealPicker();
@@ -9904,6 +9905,13 @@ function bindUi() {
     });
   }
 
+  // Recipe Modal: Toggle Favorite
+  safeBind('btnModalFavorite', 'click', () => {
+    if (CURRENT_RECIPE_ID) {
+      toggleRecipeFavorite(CURRENT_RECIPE_ID);
+    }
+  });
+
   // PHASE 3.3: Smart Defaults Management Event Listeners
   document.getElementById('btnViewSmartDefaults').addEventListener('click', () => {
     showSmartDefaults();
@@ -9938,121 +9946,19 @@ function bindUi() {
     renderPlanGrid();
   });
 
-  // ========== PHASE 3: BULK MEAL OPERATIONS ==========
 
-  document.getElementById('btnCopyWeekForward').addEventListener('click', async (e) => {
-    const start = PLAN.start;
-    if (!start) { showToast('Load a plan range first', 'warning'); return; }
 
-    const btn = e.currentTarget;
-    const statusEl = document.getElementById('copyWeekStatus');
-    setLoading(btn, true, 'Copying...');
-    statusEl.textContent = 'Copying...';
-
-    try {
-      // Phase 4.5.7: Get active user
-      const activeUserRes = await api('getActiveUser');
-      const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
-
-      if (!userId) {
-        statusEl.textContent = 'No active user set';
-        setLoading(btn, false);
-        return;
-      }
-
-      for (let i = 0; i < 7; i++) {
-        const srcDate = addDays(start, i);
-        const dstDate = addDays(start, i + 7);
-        const srcPlan = PLAN.plansByDate[srcDate];
-        if (!srcPlan) continue;
-
-        for (const slot of ['Breakfast', 'Lunch', 'Dinner']) {
-          const mealsArray = Array.isArray(srcPlan[slot]) ? srcPlan[slot] : (srcPlan[slot] ? [srcPlan[slot]] : []);
-          for (const meal of mealsArray) {
-            if (!meal) continue;
-            await api('upsertUserPlanMeal', {
-              userId,
-              date: dstDate,
-              slot,
-              meal: {
-                RecipeId: meal.RecipeId || '',
-                Title: meal.Title || ''
-              }
-            });
-          }
-        }
-      }
-
-      const endDate = addDays(start, daysInclusive(start, PLAN.start + 13));
-      await loadPlansIntoUi(start, daysInclusive(start, endDate));
-      statusEl.textContent = 'Week copied!';
-      setTimeout(() => { statusEl.textContent = ''; }, 3000);
-    } catch (e) {
-      statusEl.textContent = `Error: ${e.message}`;
-    } finally {
-      setLoading(btn, false);
-    }
-  });
-
-  document.getElementById('btnCopyWeekBack').addEventListener('click', async (e) => {
-    const start = PLAN.start;
-    if (!start) { showToast('Load a plan range first', 'warning'); return; }
-
-    const btn = e.currentTarget;
-    const statusEl = document.getElementById('copyWeekStatus');
-    setLoading(btn, true, 'Copying...');
-    statusEl.textContent = 'Copying...';
-
-    try {
-      // Phase 4.5.7: Get active user
-      const activeUserRes = await api('getActiveUser');
-      const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
-
-      if (!userId) {
-        statusEl.textContent = 'No active user set';
-        setLoading(btn, false);
-        return;
-      }
-
-      for (let i = 0; i < 7; i++) {
-        const srcDate = addDays(start, i);
-        const dstDate = addDays(start, i - 7);
-        const srcPlan = PLAN.plansByDate[srcDate];
-        if (!srcPlan) continue;
-
-        for (const slot of ['Breakfast', 'Lunch', 'Dinner']) {
-          const mealsArray = Array.isArray(srcPlan[slot]) ? srcPlan[slot] : (srcPlan[slot] ? [srcPlan[slot]] : []);
-          for (const meal of mealsArray) {
-            if (!meal) continue;
-            await api('upsertUserPlanMeal', {
-              userId,
-              date: dstDate,
-              slot,
-              meal: {
-                RecipeId: meal.RecipeId || '',
-                Title: meal.Title || ''
-              }
-            });
-          }
-        }
-      }
-
-      await loadPlansIntoUi(addDays(start, -7), daysInclusive(addDays(start, -7), start));
-      statusEl.textContent = 'Week copied!';
-      setTimeout(() => { statusEl.textContent = ''; }, 3000);
-    } catch (e) {
-      statusEl.textContent = `Error: ${e.message}`;
-    } finally {
-      setLoading(btn, false);
-    }
+  document.getElementById('btnChooseAutoFillBreakfast').addEventListener('click', () => {
+    openMealPicker('', 'Breakfast', 'auto-fill');
   });
 
   document.getElementById('btnAutoFillBreakfast').addEventListener('click', async (e) => {
     const recipeId = document.getElementById('autoFillBreakfastRecipe').value;
     if (!recipeId) { showToast('Select a recipe first', 'warning'); return; }
 
-    const recipe = RECIPES.find(r => r.RecipeId === recipeId);
-    if (!recipe) { showToast('Recipe not found', 'error'); return; }
+    // Find recipe title for toast/logging
+    const selectionDiv = document.getElementById('autoFillBreakfastSelection');
+    const recipeTitle = selectionDiv ? selectionDiv.textContent : 'Selected Recipe';
 
     const btn = e.currentTarget;
     const statusEl = document.getElementById('autoFillStatus');
@@ -10080,8 +9986,8 @@ function bindUi() {
             date: dateKey,
             slot: 'Breakfast',
             meal: {
-              RecipeId: recipe.RecipeId,
-              Title: recipe.Title
+              RecipeId: recipeId,
+              Title: recipeTitle
             }
           });
           filled++;
@@ -10143,11 +10049,16 @@ function bindUi() {
 
         for (const slot of ['Breakfast', 'Lunch', 'Dinner']) {
           if (day[slot]) {
-            await api('upsertPlanMeal', {
+            const activeUserRes = await api('getActiveUser');
+            const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
+            await api('upsertUserPlanMeal', {
+              userId,
               date: dateKey,
               slot,
-              recipeId: day[slot].RecipeId || '',
-              title: day[slot].Title || ''
+              meal: {
+                RecipeId: day[slot].RecipeId || '',
+                Title: day[slot].Title || ''
+              }
             });
           }
         }
@@ -10168,30 +10079,60 @@ function bindUi() {
   });
 
   document.getElementById('btnLeftoverPickerClose').addEventListener('click', () => {
-    document.getElementById('leftoverPickerBack').style.display = 'none';
+    closeModal('leftoverPickerBack');
   });
 
-  document.getElementById('leftoverPickerBack').addEventListener('click', async (e) => {
+  document.getElementById('leftoverList').addEventListener('click', async (e) => {
+    console.log('[leftoverList] Click detected. Target:', e.target, 'MP.open:', MP.open);
     const pick = e.target.closest('[data-action="pick-leftover"]');
+    console.log('[leftoverList] pick element:', pick);
     if (pick) {
       const title = pick.dataset.title;
+      const recipeId = pick.dataset.rid; // Corrected to match data-rid
       const fromDate = pick.dataset.fromdate;
       const fromSlot = pick.dataset.fromslot;
+      console.log('[leftoverList] Selecting:', recipeId, title, 'Mode:', MP.mode);
 
-      if (MP.open && MP.date && MP.slot) {
-        const res = await api('upsertPlanMeal', {
-          date: MP.date,
-          slot: MP.slot,
-          recipeId: '',
-          title,
-          useLeftovers: true,
-          from: `${fromDate} ${fromSlot}`
-        });
-
-        if (res.ok) {
-          await loadPlansIntoUi(PLAN.start, PLAN.days);
-          document.getElementById('leftoverPickerBack').style.display = 'none';
+      if (MP.open) {
+        if (MP.mode === 'auto-fill') {
+          const hiddenInput = document.getElementById('autoFillBreakfastRecipe');
+          const selectionDiv = document.getElementById('autoFillBreakfastSelection');
+          console.log('[leftoverList] Auto-fill update. Hidden:', !!hiddenInput, 'Div:', !!selectionDiv);
+          if (hiddenInput) {
+            hiddenInput.value = recipeId;
+            console.log('[leftoverList] Set hidden input value to:', recipeId);
+          }
+          if (selectionDiv) {
+            selectionDiv.textContent = title;
+            console.log('[leftoverList] Set selection display to:', title);
+          }
+          closeModal('leftoverPickerBack');
           closeMealPicker();
+          return;
+        }
+
+        if (MP.date && MP.slot) {
+          const activeUserRes = await api('getActiveUser');
+          const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
+          if (!userId) { showToast('No active user set', 'error'); return; }
+
+          const res = await api('upsertUserPlanMeal', {
+            userId,
+            date: MP.date,
+            slot: MP.slot,
+            meal: {
+              RecipeId: recipeId,
+              Title: title,
+              UseLeftovers: true,
+              From: `${fromDate} ${fromSlot}`
+            }
+          });
+
+          if (res.ok) {
+            await loadPlansIntoUi(PLAN.start, PLAN.days);
+            closeModal('leftoverPickerBack');
+            closeMealPicker();
+          }
         }
       }
       return;
@@ -10205,7 +10146,7 @@ function bindUi() {
   });
 
   document.getElementById('btnCollectionRecipePickerClose').addEventListener('click', () => {
-    document.getElementById('collectionRecipePickerBack').style.display = 'none';
+    closeModal('collectionRecipePickerBack');
   });
 
   document.getElementById('collectionRecipePickerSelect').addEventListener('change', async (e) => {
@@ -10213,24 +10154,113 @@ function bindUi() {
     await loadCollectionRecipesForPicker(collectionId);
   });
 
-  document.getElementById('collectionRecipePickerBack').addEventListener('click', async (e) => {
+  document.getElementById('collectionRecipePickerList').addEventListener('click', async (e) => {
+    // Handle "Use Entire Collection" button
+    const useEntireBtn = e.target.closest('[data-action="use-entire-collection"]');
+    if (useEntireBtn) {
+      const collectionId = useEntireBtn.dataset.collectionId;
+      console.log('[collectionRecipePickerList] Use entire collection:', collectionId);
+
+      if (!MP.open || !MP.date || !MP.slot) {
+        showToast('No meal slot selected', 'error');
+        return;
+      }
+
+      // Get collection recipes
+      const res = await api('listCollectionRecipes', { collectionId });
+      if (!res.ok || !res.recipes || res.recipes.length === 0) {
+        showToast('Collection is empty', 'error');
+        return;
+      }
+
+      const recipes = res.recipes;
+      const mainDish = recipes.find(r => r.IsMainDish);
+      const sideDishes = recipes.filter(r => !r.IsMainDish);
+
+      if (!mainDish) {
+        showToast('No main dish set in this collection. Please set one in the Collections tab.', 'warning');
+        return;
+      }
+
+      const activeUserRes = await api('getActiveUser');
+      const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
+      if (!userId) { showToast('No active user set', 'error'); return; }
+
+      // Add main dish as the meal
+      const mealRes = await api('upsertUserPlanMeal', {
+        userId,
+        date: MP.date,
+        slot: MP.slot,
+        meal: { RecipeId: mainDish.RecipeId, Title: mainDish.Title }
+      });
+
+      if (!mealRes.ok) {
+        showToast('Failed to add main dish', 'error');
+        return;
+      }
+
+      // Add side dishes as additional items
+      let addedSides = 0;
+      for (const side of sideDishes) {
+        const sideRes = await api('addAdditionalItem', {
+          date: MP.date,
+          slot: MP.slot,
+          recipeId: side.RecipeId,
+          title: side.Title,
+          itemType: 'side'
+        });
+        if (sideRes.ok) addedSides++;
+      }
+
+      await loadPlansIntoUi(PLAN.start, PLAN.days);
+      closeModal('collectionRecipePickerBack');
+      closeMealPicker();
+      showToast(`Added ${mainDish.Title} as main dish + ${addedSides} side dishes`, 'success');
+      return;
+    }
+
+    // Handle individual recipe selection
     const pick = e.target.closest('[data-action="pick-collection-recipe"]');
     if (pick) {
       const recipeId = pick.dataset.rid;
       const title = pick.dataset.title;
+      console.log('[collectionRecipePickerList] Selecting:', recipeId, title, 'Mode:', MP.mode);
 
-      if (MP.open && MP.date && MP.slot && recipeId) {
-        const res = await api('upsertPlanMeal', {
-          date: MP.date,
-          slot: MP.slot,
-          recipeId,
-          title
-        });
-
-        if (res.ok) {
-          await loadPlansIntoUi(PLAN.start, PLAN.days);
-          document.getElementById('collectionRecipePickerBack').style.display = 'none';
+      if (MP.open) {
+        if (MP.mode === 'auto-fill') {
+          const hiddenInput = document.getElementById('autoFillBreakfastRecipe');
+          const selectionDiv = document.getElementById('autoFillBreakfastSelection');
+          console.log('[collectionRecipePickerList] Auto-fill update. Hidden:', !!hiddenInput, 'Div:', !!selectionDiv);
+          if (hiddenInput) {
+            hiddenInput.value = recipeId;
+            console.log('[collectionRecipePickerList] Set hidden input value to:', recipeId);
+          }
+          if (selectionDiv) {
+            selectionDiv.textContent = title;
+            console.log('[collectionRecipePickerList] Set selection display to:', title);
+          }
+          closeModal('collectionRecipePickerBack');
           closeMealPicker();
+          return;
+        }
+
+        if (MP.date && MP.slot && recipeId) {
+          const activeUserRes = await api('getActiveUser');
+          const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
+          if (!userId) { showToast('No active user set', 'error'); return; }
+
+          const res = await api('upsertUserPlanMeal', {
+            userId,
+            date: MP.date,
+            slot: MP.slot,
+            meal: { RecipeId: recipeId, Title: title }
+          });
+
+          if (res.ok) {
+            await loadPlansIntoUi(PLAN.start, PLAN.days);
+            closeModal('collectionRecipePickerBack');
+            closeMealPicker();
+          }
         }
       }
       return;
@@ -10244,7 +10274,7 @@ function bindUi() {
   });
 
   document.getElementById('btnCollectionModalClose').addEventListener('click', () => {
-    document.getElementById('collectionModalBack').style.display = 'none';
+    closeModal('collectionModalBack');
   });
 
   document.getElementById('btnSaveCollection').addEventListener('click', async () => {
@@ -10264,7 +10294,7 @@ function bindUi() {
 
     if (res.ok) {
       await loadCollections();
-      document.getElementById('collectionModalBack').style.display = 'none';
+      closeModal('collectionModalBack');
       document.getElementById('collectionModalStatus').textContent = '';
     } else {
       document.getElementById('collectionModalStatus').textContent = res.error || 'Save failed';
@@ -10278,17 +10308,13 @@ function bindUi() {
     const res = await api('deleteCollection', { collectionId: CURRENT_COLLECTION_ID });
     if (res.ok) {
       await loadCollections();
-      document.getElementById('collectionModalBack').style.display = 'none';
+      closeModal('collectionModalBack');
     }
   });
 
   document.getElementById('collectionFilter').addEventListener('change', async (e) => {
     const collectionId = e.target.value;
-    if (collectionId) {
-      await loadCollectionRecipes(collectionId);
-    } else {
-      document.getElementById('collectionRecipesList').innerHTML = '<div class="muted">Select a collection to view recipes</div>';
-    }
+    await loadCollectionRecipes(collectionId);
   });
 
   // Import Recipe Modal
@@ -10339,7 +10365,7 @@ function bindUi() {
 
   // Assign to Planner Modal
   document.getElementById('btnAssignToPlannerClose').addEventListener('click', () => {
-    document.getElementById('assignToPlannerBack').style.display = 'none';
+    closeModal('assignToPlannerBack');
   });
 
   document.getElementById('btnConfirmAssignToPlanner').addEventListener('click', async () => {
@@ -10348,11 +10374,11 @@ function bindUi() {
 
   // Shopping List Preview Modal
   document.getElementById('btnShoppingListPreviewClose').addEventListener('click', () => {
-    document.getElementById('shoppingListPreviewBack').style.display = 'none';
+    closeModal('shoppingListPreviewBack');
   });
 
   document.getElementById('btnCancelPrintShopping').addEventListener('click', () => {
-    document.getElementById('shoppingListPreviewBack').style.display = 'none';
+    closeModal('shoppingListPreviewBack');
   });
 
   document.getElementById('btnConfirmPrintShopping').addEventListener('click', async () => {
@@ -10360,7 +10386,7 @@ function bindUi() {
   });
 
   document.getElementById('btnAssignRecipesModalClose').addEventListener('click', () => {
-    document.getElementById('assignRecipesModalBack').style.display = 'none';
+    closeModal('assignRecipesModalBack');
   });
 
   document.getElementById('assignRecipesSearch').addEventListener('input', debounce((e) => {
@@ -10369,90 +10395,200 @@ function bindUi() {
   }, 300));
 
   // ========== PHASE 2.5: Collection Main Dish Toggle ==========
+  // Handler for collection-role-select dropdowns in collectionRecipesList
+  const collRecipesEl = document.getElementById('collectionRecipesList');
+  if (collRecipesEl) {
+    collRecipesEl.addEventListener('change', async (e) => {
+      if (e.target.classList.contains('collection-role-select')) {
+        const rid = e.target.dataset.rid;
+        const cid = e.target.dataset.cid || CURRENT_COLLECTION_ID;
+        const isMain = e.target.value === '1';
+
+        if (!cid) return;
+
+        const res = await api('setMainDishInCollection', {
+          collectionId: cid,
+          recipeId: rid,
+          isMainDish: isMain
+        });
+
+        if (res.ok) {
+          showToast(isMain ? 'Set as main dish' : 'Set as side dish', 'success');
+          // DO NOT re-render here, it causes the flash/loop. 
+          // The state is already updated in DB and the select value is already changed by user.
+        } else {
+          showToast(res.error || 'Failed to update', 'error');
+          // Revert visual state on error
+          e.target.value = isMain ? '0' : '1';
+        }
+      }
+    });
+  } else {
+    console.error('[Collection] collectionRecipesList element not found!');
+  }
+
+  // Legacy handler for collectionsList (in case dropdowns appear there too)
   document.getElementById('collectionsList').addEventListener('change', async (e) => {
     if (e.target.classList.contains('collection-role-select')) {
       const rid = e.target.dataset.rid;
+      const cid = e.target.dataset.cid || CURRENT_COLLECTION_ID;
       const isMain = e.target.value === '1';
       console.log('[Collection] Setting recipe', rid, 'isMain:', isMain);
 
+      if (!cid) {
+        console.error('[Collection] No collection ID found');
+        return;
+      }
+
       await api('setMainDishInCollection', {
-        collectionId: CURRENT_COLLECTION_ID,
+        collectionId: cid,
         recipeId: rid,
-        isMain: isMain
       });
-
-      // Refresh valid main dish state
-      // Re-render to show updated state (e.g. if we enforce only 1 main)
-      // For now, simpler to just let it save.
     }
   });
 
-  document.getElementById('assignRecipesModalBack').addEventListener('click', async (e) => {
-    const toggle = e.target.closest('[data-action="toggle-recipe-in-collection"]');
-    if (toggle) {
-      const recipeId = toggle.dataset.rid;
-      const isInCollection = toggle.dataset.incollection === 'true';
+  // Attach to the list container directly to avoid propagation issues from modal backdrop handlers
+  const assignListEl = document.getElementById('assignRecipesList');
+  if (assignListEl) {
+    assignListEl.addEventListener('click', async (e) => {
+      const toggle = e.target.closest('[data-action="toggle-recipe-in-collection"]');
+      if (toggle) {
+        const recipeId = toggle.dataset.rid;
 
-      let res;
-      if (isInCollection) {
-        res = await api('removeRecipeFromCollection', {
-          collectionId: CURRENT_COLLECTION_ID,
-          recipeId
-        });
-      } else {
-        res = await api('addRecipeToCollection', {
-          collectionId: CURRENT_COLLECTION_ID,
-          recipeId
-        });
-      }
+        const isInCollection = toggle.dataset.incollection === 'true';
 
-      if (res.ok) {
-        await loadCollectionRecipes(CURRENT_COLLECTION_ID);
-        renderAssignRecipesList(document.getElementById('assignRecipesSearch').value.trim().toLowerCase());
+        let res;
+        if (isInCollection) {
+          res = await api('removeRecipeFromCollection', {
+            collectionId: CURRENT_COLLECTION_ID,
+            recipeId
+          });
+          if (res.ok) {
+            MODAL_COLLECTION_IDS.delete(recipeId);
+          }
+        } else {
+          res = await api('addRecipeToCollection', {
+            collectionId: CURRENT_COLLECTION_ID,
+            recipeId
+          });
+          if (res.ok) {
+            MODAL_COLLECTION_IDS.add(recipeId);
+          }
+        }
+
+        if (res.ok) {
+          // Just re-render the list with the updated local set
+          renderAssignRecipesList(document.getElementById('assignRecipesSearch').value.trim().toLowerCase());
+
+          // Update the global collection count and re-render the main list
+          const coll = COLLECTIONS.find(c => c.CollectionId == CURRENT_COLLECTION_ID);
+          if (coll) {
+            coll.RecipeCount = (coll.RecipeCount || 0) + (isInCollection ? -1 : 1);
+            if (coll.RecipeCount < 0) coll.RecipeCount = 0;
+            renderCollections();
+          }
+
+          // Also verify in background specifically for reliability if we want, but local update suffices for UI speed
+          // await loadCollectionRecipes(CURRENT_COLLECTION_ID); // Optional: reload main view if needed, but not strictly necessary for modal
+        } else {
+          showToast(res.error || 'Failed to update', 'error');
+        }
       }
-    }
-  });
+    });
+  }
 
   document.getElementById('collectionsList').addEventListener('click', async (e) => {
     // Toggle dropdown menu for assign button
+    // 1. Assign Button Dropdown (Global Portal)
     const assignBtn = e.target.closest('.collection-assign-btn');
     if (assignBtn) {
       e.preventDefault();
       e.stopPropagation();
-      console.log('[Collection Dropdown] Assign button clicked (Global Portal)');
       const cid = assignBtn.dataset.cid;
       const cname = assignBtn.dataset.cname;
-
-      // Use new global portal function
       if (typeof openGlobalCollectionDropdown === 'function') {
         openGlobalCollectionDropdown(assignBtn, cid, cname);
-      } else {
-        console.error('openGlobalCollectionDropdown not found!');
       }
       return;
     }
 
+    // 2. Edit Collection
     const edit = e.target.closest('[data-action="edit-collection"]');
     if (edit) {
-      const collectionId = edit.dataset.cid;
-      const res = await api('getCollection', { collectionId });
-      if (res.ok) {
-        openCollectionModal(res.collection);
+      try {
+        const collectionId = edit.dataset.cid;
+        // console.log('Edit clicked for:', collectionId);
+        const res = await api('getCollection', { collectionId });
+        if (res.ok) {
+          openCollectionModal(res.collection);
+        } else {
+          showToast('Failed to load collection details: ' + (res.error || 'Unknown error'), 'error');
+        }
+      } catch (err) {
+        console.error('Edit Collection error:', err);
+        showToast('Error opening edit modal: ' + err.message, 'error');
       }
       return;
     }
 
+    // 3. Assign Recipes (Edit Recipes in Collection)
     const assign = e.target.closest('[data-action="assign-recipes"]');
     if (assign) {
-      CURRENT_COLLECTION_ID = assign.dataset.cid;
-      await openAssignRecipesModal();
+      const collectionId = assign.dataset.cid;
+      CURRENT_COLLECTION_ID = collectionId;
+      openAssignRecipesModal(collectionId);
       return;
     }
 
-    const shoppingList = e.target.closest('[data-action="collection-shopping-list"]');
-    if (shoppingList) {
-      const collectionId = shoppingList.dataset.cid;
-      await generateCollectionShoppingList(collectionId);
+    // 4. Shopping List (Navigate & Select)
+    const shop = e.target.closest('[data-action="collection-shopping-list"]');
+    if (shop) {
+      const collectionId = shop.dataset.cid;
+      setTab('shop');
+      const incCheck = document.getElementById('shopIncludeCollections');
+      if (incCheck && !incCheck.checked) incCheck.click();
+      setTimeout(() => {
+        const selInfo = document.getElementById('shopCollectionSelect');
+        if (selInfo) {
+          for (let i = 0; i < selInfo.options.length; i++) {
+            if (selInfo.options[i].value == collectionId) selInfo.options[i].selected = true;
+          }
+        }
+      }, 100);
+      return;
+    }
+
+    // 5. Delete Collection (NEW)
+    const del = e.target.closest('[data-action="delete-collection"]');
+    if (del) {
+      if (!confirm('Are you sure you want to delete this collection? This cannot be undone.')) return;
+      const collectionId = del.dataset.cid;
+      const res = await api('deleteCollection', { collectionId });
+      if (res.ok) {
+        showToast('Collection deleted', 'success');
+        await loadCollections();
+      } else {
+        showToast('Error deleting collection: ' + res.error, 'error');
+      }
+      return;
+    }
+
+    // 6. View Collection (Load recipes)
+    const viewCollection = e.target.closest('[data-action="view-collection"]');
+    if (viewCollection) {
+      const collectionId = viewCollection.dataset.cid;
+      await loadCollectionRecipes(collectionId);
+      document.getElementById('collectionRecipesList').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      return;
+    }
+
+    // 7. Assign to Week/Planner/Day (From Dropdown or Direct)
+    const assignToWeek = e.target.closest('[data-action="assign-collection-to-week"]');
+    if (assignToWeek) {
+      const collectionId = assignToWeek.dataset.cid;
+      const collectionName = assignToWeek.dataset.cname;
+      document.querySelectorAll('.collection-assign-menu').forEach(m => m.style.display = 'none');
+      await showAssignCollectionToWeekModal(collectionId, collectionName);
       return;
     }
 
@@ -10460,7 +10596,6 @@ function bindUi() {
     if (assignToPlanner) {
       const collectionId = assignToPlanner.dataset.cid;
       const collectionName = assignToPlanner.dataset.cname;
-      // Close dropdown menu
       document.querySelectorAll('.collection-assign-menu').forEach(m => m.style.display = 'none');
       await showAssignCollectionFromCollectionsTab(collectionId, collectionName);
       return;
@@ -10470,7 +10605,6 @@ function bindUi() {
     if (assignToDay) {
       const collectionId = assignToDay.dataset.cid;
       const collectionName = assignToDay.dataset.cname;
-      // Close dropdown menu
       document.querySelectorAll('.collection-assign-menu').forEach(m => m.style.display = 'none');
       await showAssignCollectionToDayModal(collectionId, collectionName);
       return;
@@ -10478,43 +10612,9 @@ function bindUi() {
   });
 
   // ========== PHASE 2.4: Collection View Toggle ==========
-  document.getElementById('viewCollectionsCard').addEventListener('click', () => {
-    COLLECTION_VIEW_MODE = 'card';
-    document.getElementById('viewCollectionsCard').classList.add('active');
-    document.getElementById('viewCollectionsList').classList.remove('active');
-    renderCollections();
-  });
 
-  document.getElementById('viewCollectionsList').addEventListener('click', () => {
-    COLLECTION_VIEW_MODE = 'list';
-    document.getElementById('viewCollectionsList').classList.add('active');
-    document.getElementById('viewCollectionsCard').classList.remove('active');
-    renderCollections();
-  });
 
-  // ========== PHASE 2.4: Collection Card Actions ==========
-  document.getElementById('collectionsList').addEventListener('click', async (e) => {
-    // View collection (card view)
-    const viewCollection = e.target.closest('[data-action="view-collection"]');
-    if (viewCollection) {
-      const collectionId = viewCollection.dataset.cid;
-      await loadCollectionRecipes(collectionId);
-      // Scroll to collection recipes list to show the recipes
-      document.getElementById('collectionRecipesList').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      return;
-    }
 
-    // Assign collection to week
-    const assignToWeek = e.target.closest('[data-action="assign-collection-to-week"]');
-    if (assignToWeek) {
-      const collectionId = assignToWeek.dataset.cid;
-      const collectionName = assignToWeek.dataset.cname;
-      // Close dropdown menu
-      document.querySelectorAll('.collection-assign-menu').forEach(m => m.style.display = 'none');
-      await showAssignCollectionToWeekModal(collectionId, collectionName);
-      return;
-    }
-  });
 
   // Close collection assign dropdowns when clicking outside
   document.addEventListener('click', (e) => {
@@ -11096,7 +11196,10 @@ async function executeBulkAssign() {
       const slot = slots[slotIndex % slots.length];
       const dateStr = currentDate.toISOString().split('T')[0];
 
-      const res = await api('upsertPlanMeal', {
+      const activeUserRes = await api('getActiveUser');
+      const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
+      const res = await api('upsertUserPlanMeal', {
+        userId,
         date: dateStr,
         slot: slot,
         meal: { RecipeId: recipe.RecipeId, Title: recipe.Title }
@@ -14164,14 +14267,7 @@ function getCommandRegistry() {
       description: 'Smart weekly meal planning',
       action: () => document.getElementById('btnGenerateWeek')?.click()
     },
-    {
-      id: 'planner-copy-forward',
-      category: 'Planner Actions',
-      icon: '⏩',
-      title: 'Copy Week Forward',
-      description: 'Duplicate current week to next',
-      action: () => document.getElementById('btnCopyWeekForward')?.click()
-    },
+
 
     // Shopping list actions
     {
@@ -14542,26 +14638,30 @@ function showRecipeContextMenu(x, y, recipeId) {
 
   currentContextMenuRecipeId = recipeId;
 
-  // Position the menu, ensuring it stays within viewport
+  // Position the menu (using page coordinates for absolute positioning)
   const menuWidth = 220; // Estimated width
   const menuHeight = 350; // Estimated height
 
   let leftPos = x;
   let topPos = y;
 
+  // Get viewport boundaries accounting for scroll
+  const viewportRight = window.scrollX + window.innerWidth;
+  const viewportBottom = window.scrollY + window.innerHeight;
+
   // Adjust if menu would go off right edge
-  if (leftPos + menuWidth > window.innerWidth - 20) {
-    leftPos = window.innerWidth - menuWidth - 20;
+  if (leftPos + menuWidth > viewportRight - 20) {
+    leftPos = viewportRight - menuWidth - 20;
   }
 
   // Adjust if menu would go off bottom edge
-  if (topPos + menuHeight > window.innerHeight - 20) {
-    topPos = window.innerHeight - menuHeight - 20;
+  if (topPos + menuHeight > viewportBottom - 20) {
+    topPos = viewportBottom - menuHeight - 20;
   }
 
   // Ensure menu doesn't go off left or top edges
-  leftPos = Math.max(20, leftPos);
-  topPos = Math.max(20, topPos);
+  leftPos = Math.max(window.scrollX + 20, leftPos);
+  topPos = Math.max(window.scrollY + 20, topPos);
 
   menu.style.left = leftPos + 'px';
   menu.style.top = topPos + 'px';
@@ -14654,112 +14754,134 @@ document.addEventListener('contextmenu', (e) => {
 // ========== GRID MEAL CONTEXT MENU (Planner Grid View) ==========
 
 let currentGridMealContext = null; // { date, slot, meals, additionalItems }
+let _gridMenuLoading = false; // Prevent concurrent menu loads
 
 /**
  * Show context menu for grid meal items
  */
 async function showGridMealContextMenu(x, y, date, slot) {
-  const menu = document.getElementById('grid-meal-context-menu');
-  if (!menu) return;
+  // Prevent concurrent loads
+  if (_gridMenuLoading) return;
+  _gridMenuLoading = true;
 
-  // Hide other context menus
-  hideRecipeContextMenu();
-
-  // Get meals for this date/slot
-  const plan = PLAN.plansByDate[date] || {};
-  const meals = plan[slot];
-  const mealsArray = Array.isArray(meals) ? meals : (meals && meals.Title ? [meals] : []);
-
-  // Get additional items
-  const itemKey = `${date}:${slot}`;
-  let additionalItems = [];
-
-  // Try to get from cached data or fetch
   try {
-    const result = await api('getAdditionalItems', { date, slot });
-    if (result.ok && result.items) {
-      additionalItems = result.items;
+    const menu = document.getElementById('grid-meal-context-menu');
+    if (!menu) return;
+
+    // Hide other context menus
+    hideRecipeContextMenu();
+
+    // Get meals for this date/slot
+    const plan = PLAN.plansByDate[date] || {};
+    const meals = plan[slot];
+    const mealsArray = Array.isArray(meals) ? meals : (meals && meals.Title ? [meals] : []);
+
+    console.log('[GridContextMenu] Show menu for', date, slot);
+    console.log('[GridContextMenu] Meals:', mealsArray.map(m => ({ RecipeId: m.RecipeId, Title: m.Title })));
+
+    // Get additional items
+    let additionalItems = [];
+    try {
+      const result = await api('getAdditionalItems', { date, slot });
+      if (result.ok && result.items) {
+        additionalItems = result.items;
+      }
+    } catch (e) {
+      console.warn('Failed to fetch additional items:', e);
     }
-  } catch (e) {
-    console.warn('Failed to fetch additional items:', e);
+
+    if (mealsArray.length === 0 && additionalItems.length === 0) {
+      return; // Nothing to show
+    }
+
+    currentGridMealContext = { date, slot, meals: mealsArray, additionalItems };
+
+    // Build menu content
+    const header = document.getElementById('grid-meal-context-header');
+    const itemsContainer = document.getElementById('grid-meal-context-items');
+
+    header.textContent = `${slot} - ${date}`;
+
+    let itemsHtml = '';
+
+    // Add main meals - View and Send to iPad for each meal
+    mealsArray.forEach((meal, idx) => {
+      itemsHtml += `
+        <button class="context-menu-item" data-action="view-grid-meal" data-rid="${escapeAttr(meal.RecipeId || '')}">
+          <span>👁️</span>
+          <span>View: ${escapeHtml(meal.Title)}</span>
+        </button>
+        <button class="context-menu-item" data-action="send-to-ipad" data-rid="${escapeAttr(meal.RecipeId || '')}">
+          <span>📱</span>
+          <span>Send to iPad: ${escapeHtml(meal.Title.length > 20 ? meal.Title.substring(0, 20) + '...' : meal.Title)}</span>
+        </button>
+      `;
+    });
+
+    // Add separator before additional items if there are any
+    if (mealsArray.length > 0 && additionalItems.length > 0) {
+      itemsHtml += '<div class="context-menu-separator"></div>';
+      itemsHtml += '<div style="padding:4px 12px;font-size:11px;color:var(--muted);font-weight:600;">Additional Items</div>';
+    }
+
+    // Add additional items
+    additionalItems.forEach(item => {
+      const typeIcon = item.ItemType === 'dessert' ? '🍰' : item.ItemType === 'appetizer' ? '🥗' : '🍽️';
+      itemsHtml += `
+        <button class="context-menu-item" data-action="view-grid-meal" data-rid="${escapeAttr(item.RecipeId || '')}">
+          <span>${typeIcon}</span>
+          <span>View: ${escapeHtml(item.Title)} <span style="color:var(--muted);font-size:11px;">(${item.ItemType || 'side'})</span></span>
+        </button>
+        <button class="context-menu-item" data-action="send-to-ipad" data-rid="${escapeAttr(item.RecipeId || '')}">
+          <span>📱</span>
+          <span>Send to iPad</span>
+        </button>
+      `;
+    });
+
+    // Add "Change [Slot]" button once at the end (applies to entire slot)
+    if (mealsArray.length > 0 || additionalItems.length > 0) {
+      itemsHtml += '<div class="context-menu-separator"></div>';
+      itemsHtml += `
+        <button class="context-menu-item" data-action="change-grid-meal" data-date="${escapeAttr(date)}" data-slot="${escapeAttr(slot)}">
+          <span>✏️</span>
+          <span>Change ${escapeHtml(slot)}</span>
+        </button>
+      `;
+    }
+
+    itemsContainer.innerHTML = itemsHtml;
+
+    // Position the menu (using page coordinates for absolute positioning)
+    const menuWidth = 280;
+    const menuHeight = Math.min(400, (mealsArray.length + additionalItems.length) * 44 + 60);
+
+    let leftPos = x;
+    let topPos = y;
+
+    // Get viewport boundaries accounting for scroll
+    const viewportRight = window.scrollX + window.innerWidth;
+    const viewportBottom = window.scrollY + window.innerHeight;
+
+    // Adjust if menu would go off right edge
+    if (leftPos + menuWidth > viewportRight - 20) {
+      leftPos = viewportRight - menuWidth - 20;
+    }
+    // Adjust if menu would go off bottom edge
+    if (topPos + menuHeight > viewportBottom - 20) {
+      topPos = viewportBottom - menuHeight - 20;
+    }
+
+    // Ensure menu doesn't go off left or top edges
+    leftPos = Math.max(window.scrollX + 20, leftPos);
+    topPos = Math.max(window.scrollY + 20, topPos);
+
+    menu.style.left = leftPos + 'px';
+    menu.style.top = topPos + 'px';
+    menu.classList.add('visible');
+  } finally {
+    _gridMenuLoading = false;
   }
-
-  if (mealsArray.length === 0 && additionalItems.length === 0) {
-    return; // Nothing to show
-  }
-
-  currentGridMealContext = { date, slot, meals: mealsArray, additionalItems };
-
-  // Build menu content
-  const header = document.getElementById('grid-meal-context-header');
-  const itemsContainer = document.getElementById('grid-meal-context-items');
-
-  header.textContent = `${slot} - ${date}`;
-
-  let itemsHtml = '';
-
-  // Add main meals
-  mealsArray.forEach((meal, idx) => {
-    const badge = meal.IsFallback ? '👨‍👩‍👧‍👦' : '👤';
-    itemsHtml += `
-      <button class="context-menu-item" data-action="view-grid-meal" data-rid="${escapeAttr(meal.RecipeId || '')}">
-        <span>👁️</span>
-        <span>View: ${escapeHtml(meal.Title)}</span>
-      </button>
-      <button class="context-menu-item" data-action="send-to-ipad" data-rid="${escapeAttr(meal.RecipeId || '')}">
-        <span>📱</span>
-        <span>Send to iPad</span>
-      </button>
-      <button class="context-menu-item" data-action="change-grid-meal" data-date="${escapeAttr(date)}" data-slot="${escapeAttr(slot)}">
-        <span>✏️</span>
-        <span>Change ${escapeHtml(slot)}</span>
-      </button>
-    `;
-  });
-
-  // Add separator if there are additional items
-  if (mealsArray.length > 0 && additionalItems.length > 0) {
-    itemsHtml += '<div class="context-menu-separator"></div>';
-    itemsHtml += '<div style="padding:4px 12px;font-size:11px;color:var(--muted);font-weight:600;">Additional Items</div>';
-  }
-
-  // Add additional items
-  additionalItems.forEach(item => {
-    const typeIcon = item.ItemType === 'dessert' ? '🍰' : item.ItemType === 'appetizer' ? '🥗' : '🍽️';
-    itemsHtml += `
-      <button class="context-menu-item" data-action="view-grid-meal" data-rid="${escapeAttr(item.RecipeId || '')}">
-        <span>${typeIcon}</span>
-        <span>${escapeHtml(item.Title)} <span style="color:var(--muted);font-size:11px;">(${item.ItemType || 'side'})</span></span>
-      </button>
-      <button class="context-menu-item" data-action="send-to-ipad" data-rid="${escapeAttr(item.RecipeId || '')}">
-        <span>📱</span>
-        <span>Send to iPad</span>
-      </button>
-    `;
-  });
-
-  itemsContainer.innerHTML = itemsHtml;
-
-  // Position the menu
-  const menuWidth = 280;
-  const menuHeight = Math.min(400, (mealsArray.length + additionalItems.length) * 44 + 60);
-
-  let leftPos = x;
-  let topPos = y;
-
-  if (leftPos + menuWidth > window.innerWidth - 20) {
-    leftPos = window.innerWidth - menuWidth - 20;
-  }
-  if (topPos + menuHeight > window.innerHeight - 20) {
-    topPos = window.innerHeight - menuHeight - 20;
-  }
-
-  leftPos = Math.max(20, leftPos);
-  topPos = Math.max(20, topPos);
-
-  menu.style.left = leftPos + 'px';
-  menu.style.top = topPos + 'px';
-  menu.classList.add('visible');
 }
 
 /**
@@ -14869,15 +14991,26 @@ document.addEventListener('click', async (e) => {
       const date = menuItem.getAttribute('data-date');
       const slot = menuItem.getAttribute('data-slot');
 
-      if (action === 'view-grid-meal' && rid) {
+      console.log('[GridContextMenu] Click:', { action, rid, date, slot });
+
+      if (action === 'view-grid-meal') {
         hideGridMealContextMenu();
-        await openRecipeModalView(rid);
+        if (rid) {
+          await openRecipeModalView(rid);
+        } else {
+          console.warn('[GridContextMenu] View clicked but no recipe ID');
+          showToast('Cannot view: No recipe selected for this meal', 'warning');
+        }
         return;
       }
 
-      if (action === 'send-to-ipad' && rid) {
+      if (action === 'send-to-ipad') {
         hideGridMealContextMenu();
-        await window.sendRecipeToiPad(rid);
+        if (rid) {
+          await window.sendRecipeToiPad(rid);
+        } else {
+          showToast('Cannot send: No recipe selected for this meal', 'warning');
+        }
         return;
       }
 
@@ -15563,3 +15696,4 @@ function openGlobalCollectionDropdown(btn, cid, cname) {
 
 // Init Tooltips
 initGlobalTooltips();
+

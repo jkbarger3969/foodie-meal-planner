@@ -1421,6 +1421,22 @@
       background: rgba(63, 81, 181, 0.1);
     }
 
+    /* Leftover meal indicator */
+    .grid-meal.leftover-meal {
+      border-left: 3px solid #a855f7;
+      background: linear-gradient(135deg, rgba(168, 85, 247, 0.15) 0%, rgba(168, 85, 247, 0.05) 100%);
+    }
+
+    .grid-meal.leftover-meal:hover {
+      background: linear-gradient(135deg, rgba(168, 85, 247, 0.25) 0%, rgba(77, 163, 255, 0.15) 100%);
+    }
+
+    .leftover-indicator {
+      font-size: 10px;
+      color: #a855f7;
+      font-style: italic;
+    }
+
     /* Multi-meal grid container */
     .grid-meal-multi {
       position: relative;
@@ -3187,7 +3203,7 @@
 
     /* Context Menu */
     .context-menu {
-      position: fixed;
+      position: absolute;
       background: var(--bg);
       border: 1px solid var(--line);
       border-radius: 8px;
