@@ -3529,17 +3529,11 @@ async function initGoogleCalendar() {
 // This function is now updated to use the new PKCE getAuthUrl and open it
 async function getGoogleAuthUrl() {
   try {
-    // 1. Get the PKCE Auth URL
-    const authUrl = googleCal.getAuthUrl();
-    if (!authUrl) return err_('Failed to generate auth URL');
-
-    // 2. Open it in default browser
-    const { shell } = require('electron');
-    await shell.openExternal(authUrl);
-
-    return ok_({ url: authUrl });
+    // Start the full OAuth flow with automatic callback handling
+    const result = await googleCal.startAuthFlow();
+    return result;
   } catch (error) {
-    return err_(error.message || 'Failed to get auth URL');
+    return err_(error.message || 'Failed to complete Google authorization');
   }
 }
 
