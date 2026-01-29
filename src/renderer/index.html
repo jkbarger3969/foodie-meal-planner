@@ -867,7 +867,7 @@
         <label
           style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; font-size: 14px; margin-bottom: 0;">
           <input type="checkbox" id="shopIncludeCollections" style="cursor: pointer; width: 16px; height: 16px;">
-          <span style="color: var(--text);">Include collections in shopping list</span>
+          <span style="color: var(--text);">Generate shopping list from collections</span>
         </label>
 
         <div id="collectionInclusionOptions" style="display:none; margin-top:16px;">
@@ -881,23 +881,22 @@
           </div>
 
           <div style="margin-bottom:12px;">
-            <div style="font-size:13px; font-weight:600; color: var(--text); margin-bottom:8px;">Inclusion Mode:
-            </div>
-            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:8px;">
-              <input type="radio" name="shopCollectionMode" value="independent" checked
-                style="cursor:pointer; width:16px; height:16px;">
-              <span style="font-size:13px; color: var(--text);">Independent (add to shopping list, no date
-                tie)</span>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="shopCollectionAddToDateRange" style="cursor:pointer; width:16px; height:16px;">
+              <span style="font-size:13px; color: var(--text);">Also include date range meals (if selected above)</span>
             </label>
-            <div class="muted" style="margin-left:24px; margin-bottom:8px;">
-              Collections will be added to the shopping list regardless of planned meals
+            <div class="muted" style="margin-left:24px; margin-top:4px;">
+              When checked, collection ingredients will be merged with your date range shopping list
             </div>
           </div>
 
-          <div class="item" style="background:rgba(255,193,7,0.14); border-color: rgba(255,193,7,0.30);">
+          <button id="btnGenerateCollectionShop" class="primary" style="width:100%; margin-top:12px;">
+            Generate Shopping List from Collections
+          </button>
+
+          <div class="item" style="background:rgba(255,193,7,0.14); border-color: rgba(255,193,7,0.30); margin-top:12px;">
             <div class="muted" style="color: var(--text); opacity: 0.9;">
-              <strong>💡 Note:</strong> If collection recipes are already in your date range, ingredients won't be
-              duplicated.
+              <strong>Note:</strong> Duplicate ingredients will be merged automatically.
             </div>
           </div>
         </div>

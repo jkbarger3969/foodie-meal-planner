@@ -4890,12 +4890,20 @@ function loadPersistedShop_() {
 async function buildShop() {
   const start = document.getElementById('shopStart').value;
   const end = document.getElementById('shopEnd').value;
-  if (!start || !end) {
-    document.getElementById('shopOut').innerHTML = `<div class="muted">Please select start and end dates.</div>`;
+  const includeCollections = document.getElementById('shopIncludeCollections').checked;
+  const selectedCollections = includeCollections ? getSelectedCollections() : [];
+  
+  // Check if we have either date range OR collections selected
+  const hasDateRange = start && end;
+  const hasCollections = selectedCollections.length > 0;
+  
+  if (!hasDateRange && !hasCollections) {
+    document.getElementById('shopOut').innerHTML = `<div class="muted">Please select a date range or check "Include collections" and select collections.</div>`;
     return;
   }
-  SHOP.start = start;
-  SHOP.end = end;
+  
+  SHOP.start = start || '';
+  SHOP.end = end || '';
 
   const out = document.getElementById('shopOut');
   out.innerHTML = `<div class="muted">Generating...</div>`;
@@ -4905,114 +4913,211 @@ async function buildShop() {
   const activeUserRes = await api('getActiveUser');
   const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
 
-  // Build main shopping list from date range
-  const res = await api('buildShoppingList', { userId, start, end, excludeLeftovers: true, includeLowStock });
-  if (!res.ok) {
-    out.innerHTML = `<div class="muted">Error: ${escapeHtml(res.error || '')}</div>`;
-    return;
+  let groups = [];
+  let pantryWarnings = [];
+  let pantryDeductions = [];
+
+  // Build main shopping list from date range (if provided)
+  if (hasDateRange) {
+    const res = await api('buildShoppingList', { userId, start, end, excludeLeftovers: true, includeLowStock });
+    if (!res.ok) {
+      out.innerHTML = `<div class="muted">Error: ${escapeHtml(res.error || '')}</div>`;
+      return;
+    }
+
+    groups = res.groups || [];
+    pantryWarnings = res.pantryWarnings || [];
+    pantryDeductions = res.pantryDeductions || [];
+
+    // Show pantry deductions summary
+    if (pantryDeductions.length > 0) {
+      showToast(`Pantry deducted: ${pantryDeductions.length} items`, 'info', 3000);
+    }
+
+    // Show pantry warnings
+    if (pantryWarnings.length > 0) {
+      const warningMsg = pantryWarnings.map(w => w.message).join('\n');
+      showToast(`Low stock warnings:\n${warningMsg}`, 'warning', 8000);
+    }
   }
 
-  let groups = res.groups || [];
-  const pantryWarnings = res.pantryWarnings || [];
-  const pantryDeductions = res.pantryDeductions || [];
+  // Add collections (independent of date range)
+  if (hasCollections) {
+    // Aggregate ingredients from selected collections
+    for (const collectionId of selectedCollections) {
+      const collRes = await api('listCollectionRecipes', { collectionId });
+      if (!collRes.ok || !collRes.recipes) continue;
 
-  // Show pantry deductions summary
-  if (pantryDeductions.length > 0) {
-    showToast(`Pantry deducted: ${pantryDeductions.length} items`, 'info', 3000);
-  }
+      for (const recipe of collRes.recipes) {
+        const ingRes = await api('listRecipeIngredients', { recipeId: recipe.RecipeId });
+        if (!ingRes.ok || !ingRes.items) continue;
 
-  // Show pantry warnings
-  if (pantryWarnings.length > 0) {
-    const warningMsg = pantryWarnings.map(w => w.message).join('\n');
-    showToast(`⚠️ Low stock warnings:\n${warningMsg}`, 'warning', 8000);
-  }
+        // Merge ingredients into groups
+        for (const ing of ingRes.items) {
+          const storeId = ing.StoreId || '';
+          const category = ing.Category || 'Other';
+          const ingredientNorm = (ing.IngredientNorm || '').toLowerCase();
+          const unit = (ing.Unit || '').toLowerCase();
 
-  // Check if collections should be included
-  const includeCollections = document.getElementById('shopIncludeCollections').checked;
-  if (includeCollections) {
-    const selectedCollections = getSelectedCollections();
+          if (!ingredientNorm) continue;
 
-    if (selectedCollections.length > 0) {
-      // Get existing recipe IDs from the main shopping list to avoid duplicates
-      const existingRecipeIds = new Set();
-      for (const group of groups) {
-        for (const item of group.Items || []) {
-          for (const ex of item.Examples || []) {
-            // Extract recipe ID from examples if available (not implemented in current schema)
-            // For now, we'll deduplicate by ingredient name
+          // Find or create store group
+          let storeGroup = groups.find(g => g.StoreId === storeId);
+          if (!storeGroup) {
+            storeGroup = {
+              StoreId: storeId,
+              StoreName: getStoreNameById(storeId) || storeId || 'No Store',
+              Items: []
+            };
+            groups.push(storeGroup);
           }
-        }
-      }
 
-      // Aggregate ingredients from selected collections
-      for (const collectionId of selectedCollections) {
-        const collRes = await api('listCollectionRecipes', { collectionId });
-        if (!collRes.ok || !collRes.recipes) continue;
+          // Find or create ingredient bucket
+          let bucket = storeGroup.Items.find(b =>
+            b.IngredientNorm.toLowerCase() === ingredientNorm &&
+            (b.Unit || '').toLowerCase() === unit
+          );
 
-        for (const recipe of collRes.recipes) {
-          const ingRes = await api('listRecipeIngredients', { recipeId: recipe.RecipeId });
-          if (!ingRes.ok || !ingRes.items) continue;
+          if (!bucket) {
+            bucket = {
+              Category: category,
+              IngredientNorm: ingredientNorm,
+              Unit: ing.Unit || '',
+              QtyNum: 0,
+              QtyText: '',
+              Examples: [],
+              SourceIds: []
+            };
+            storeGroup.Items.push(bucket);
+          }
 
-          // Merge ingredients into groups
-          for (const ing of ingRes.items) {
-            const storeId = ing.StoreId || '';
-            const category = ing.Category || 'Other';
-            const ingredientNorm = (ing.IngredientNorm || '').toLowerCase();
-            const unit = (ing.Unit || '').toLowerCase();
+          // Aggregate quantity
+          if (ing.QtyNum && Number.isFinite(Number(ing.QtyNum))) {
+            bucket.QtyNum += Number(ing.QtyNum);
+          }
 
-            if (!ingredientNorm) continue;
+          // Collect SourceIds (ItemIds)
+          if (ing.ItemId) {
+            bucket.SourceIds.push(ing.ItemId);
+          }
 
-            // Find or create store group
-            let storeGroup = groups.find(g => g.StoreId === storeId);
-            if (!storeGroup) {
-              storeGroup = {
-                StoreId: storeId,
-                StoreName: getStoreNameById(storeId) || storeId || 'No Store',
-                Items: []
-              };
-              groups.push(storeGroup);
-            }
-
-            // Find or create category bucket
-            const key = `${ingredientNorm}|${unit}`;
-            let bucket = storeGroup.Items.find(b =>
-              b.IngredientNorm.toLowerCase() === ingredientNorm &&
-              (b.Unit || '').toLowerCase() === unit
-            );
-
-            if (!bucket) {
-              bucket = {
-                Category: category,
-                IngredientNorm: ingredientNorm,
-                Unit: ing.Unit || '',
-                QtyNum: 0,
-                QtyText: '',
-                Examples: [],
-                SourceIds: []
-              };
-              storeGroup.Items.push(bucket);
-            }
-
-            // Aggregate quantity
-            if (ing.QtyNum && Number.isFinite(Number(ing.QtyNum))) {
-              bucket.QtyNum += Number(ing.QtyNum);
-            }
-
-            // Collect SourceIds (ItemIds)
-            if (ing.ItemId) {
-              bucket.SourceIds.push(ing.ItemId);
-            }
-
-            // Add example
-            const example = ing.IngredientRaw || `${ing.QtyText || ''} ${ing.Unit || ''} ${ingredientNorm}`.trim();
-            if (example && bucket.Examples.length < 3 && !bucket.Examples.includes(example)) {
-              bucket.Examples.push(example);
-            }
+          // Add example
+          const example = ing.IngredientRaw || `${ing.QtyText || ''} ${ing.Unit || ''} ${ingredientNorm}`.trim();
+          if (example && bucket.Examples.length < 3 && !bucket.Examples.includes(example)) {
+            bucket.Examples.push(example);
           }
         }
       }
     }
+    
+    if (!hasDateRange && hasCollections) {
+      showToast(`Shopping list generated from ${selectedCollections.length} collection(s)`, 'success');
+    }
   }
+
+  renderShop_(groups);
+  persistShop_();
+}
+
+async function buildCollectionShoppingList() {
+  const selectedCollections = getSelectedCollections();
+  if (selectedCollections.length === 0) {
+    showToast('Please select at least one collection', 'warning');
+    return;
+  }
+
+  const out = document.getElementById('shopOut');
+  out.innerHTML = `<div class="muted">Generating from collections...</div>`;
+
+  const alsoIncludeDateRange = document.getElementById('shopCollectionAddToDateRange').checked;
+  const start = document.getElementById('shopStart').value;
+  const end = document.getElementById('shopEnd').value;
+  const includeLowStock = document.getElementById('shopIncludeLowStock').checked;
+
+  let groups = [];
+
+  // If also including date range and dates are selected
+  if (alsoIncludeDateRange && start && end) {
+    const activeUserRes = await api('getActiveUser');
+    const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
+
+    const res = await api('buildShoppingList', { userId, start, end, excludeLeftovers: true, includeLowStock });
+    if (res.ok) {
+      groups = res.groups || [];
+      SHOP.start = start;
+      SHOP.end = end;
+
+      if (res.pantryDeductions && res.pantryDeductions.length > 0) {
+        showToast(`Pantry deducted: ${res.pantryDeductions.length} items`, 'info', 3000);
+      }
+    }
+  }
+
+  // Aggregate ingredients from selected collections
+  for (const collectionId of selectedCollections) {
+    const collRes = await api('listCollectionRecipes', { collectionId });
+    if (!collRes.ok || !collRes.recipes) continue;
+
+    for (const recipe of collRes.recipes) {
+      const ingRes = await api('listRecipeIngredients', { recipeId: recipe.RecipeId });
+      if (!ingRes.ok || !ingRes.items) continue;
+
+      for (const ing of ingRes.items) {
+        const storeId = ing.StoreId || '';
+        const category = ing.Category || 'Other';
+        const ingredientNorm = (ing.IngredientNorm || '').toLowerCase();
+        const unit = (ing.Unit || '').toLowerCase();
+
+        if (!ingredientNorm) continue;
+
+        let storeGroup = groups.find(g => g.StoreId === storeId);
+        if (!storeGroup) {
+          storeGroup = {
+            StoreId: storeId,
+            StoreName: getStoreNameById(storeId) || storeId || 'No Store',
+            Items: []
+          };
+          groups.push(storeGroup);
+        }
+
+        let bucket = storeGroup.Items.find(b =>
+          b.IngredientNorm.toLowerCase() === ingredientNorm &&
+          (b.Unit || '').toLowerCase() === unit
+        );
+
+        if (!bucket) {
+          bucket = {
+            Category: category,
+            IngredientNorm: ingredientNorm,
+            Unit: ing.Unit || '',
+            QtyNum: 0,
+            QtyText: '',
+            Examples: [],
+            SourceIds: []
+          };
+          storeGroup.Items.push(bucket);
+        }
+
+        if (ing.QtyNum && Number.isFinite(Number(ing.QtyNum))) {
+          bucket.QtyNum += Number(ing.QtyNum);
+        }
+
+        if (ing.ItemId) {
+          bucket.SourceIds.push(ing.ItemId);
+        }
+
+        const example = ing.IngredientRaw || `${ing.QtyText || ''} ${ing.Unit || ''} ${ingredientNorm}`.trim();
+        if (example && bucket.Examples.length < 3 && !bucket.Examples.includes(example)) {
+          bucket.Examples.push(example);
+        }
+      }
+    }
+  }
+
+  const msg = alsoIncludeDateRange && start && end
+    ? `Shopping list generated from ${selectedCollections.length} collection(s) + date range`
+    : `Shopping list generated from ${selectedCollections.length} collection(s)`;
+  showToast(msg, 'success');
 
   renderShop_(groups);
   persistShop_();
@@ -9367,20 +9472,21 @@ function bindUi() {
       }
       populateShoppingCollectionsDropdown();
     }
+  });
 
-    // Auto-refresh shopping list when toggled (if list already exists)
-    if (SHOP.start && SHOP.end) {
-      await buildShop();
+  // Generate shopping list from collections button
+  document.getElementById('btnGenerateCollectionShop').addEventListener('click', async () => {
+    const selectedCollections = getSelectedCollections();
+    if (selectedCollections.length === 0) {
+      showToast('Please select at least one collection', 'warning');
+      return;
     }
+    await buildCollectionShoppingList();
   });
 
   // Auto-refresh shopping list when collection selection changes
   document.getElementById('shopCollectionSelect').addEventListener('change', async () => {
-    // Only refresh if collections are enabled and there's already a list generated
-    const includeCollections = document.getElementById('shopIncludeCollections').checked;
-    if (includeCollections && SHOP.start && SHOP.end) {
-      await buildShop();
-    }
+    // No auto-refresh - user will click the button
   });
 
   // Store filter dropdown for shopping list
@@ -15312,11 +15418,28 @@ function clearAdvancedFilters() {
     chip.classList.remove('active');
   });
 
-  // Clear ingredients
+  // Clear advanced filters state
   ADVANCED_FILTERS.mealTypes = [];
   ADVANCED_FILTERS.mustHaveIngredients = [];
   ADVANCED_FILTERS.excludeIngredients = [];
   ADVANCED_FILTERS.active = false;
+
+  // Clear search query
+  CURRENT_QUERY = '';
+  const searchInput = document.getElementById('recipeSearch');
+  if (searchInput) searchInput.value = '';
+
+  // Clear Jump A-Z dropdown
+  const jumpLetter = document.getElementById('jumpLetter');
+  if (jumpLetter) jumpLetter.value = '';
+
+  // Clear favorites filter
+  const favoritesCheckbox = document.getElementById('recipeFavoritesOnly');
+  if (favoritesCheckbox) favoritesCheckbox.checked = false;
+
+  // Clear cuisine filter
+  const cuisineFilter = document.getElementById('recipeCuisineFilter');
+  if (cuisineFilter) cuisineFilter.value = '';
 
   // Update UI
   renderIngredientTags();
