@@ -628,6 +628,10 @@ class CompanionServer {
           await this.handleItemUnpurchased(deviceId, message);
           break;
 
+        case 'item_purchased':
+          await this.handleItemPurchased(deviceId, message);
+          break;
+
         case 'add_pantry_item':
           await this.handleAddPantryItem(deviceId, message);
           break;
@@ -1072,28 +1076,26 @@ class CompanionServer {
     }
   }
 
+
+
   async handleItemRemoved(deviceId, message) {
     const client = this.clients.get(deviceId);
     if (!client) return;
 
     try {
-      const { ingredient, qty, unit, itemId } = message;
+      const { itemId } = message;
 
-      console.log(`📥 Item removed from ${client.deviceType}: ${ingredient} (${qty} ${unit})`);
+      console.log(`📥 Item removed from ${client.deviceType}: ${itemId}`);
 
-      // Return item to pantry
+      // FIXED: Simply delete from shopping list - don't touch pantry
       const result = await handleApiCall({
-        fn: 'returnItemToPantry',
-        payload: {
-          ingredientNorm: ingredient,
-          qty: qty,
-          unit: unit
-        },
+        fn: 'deleteShoppingItem',
+        payload: { itemId: itemId },
         store
       });
 
       if (result && result.ok) {
-        console.log(`✅ Returned to pantry: ${ingredient} (${qty} ${unit})`);
+        console.log(`✅ Removed from shopping list: ${itemId}`);
 
         // Send confirmation to iPhone
         client.ws.send(JSON.stringify({
@@ -1104,15 +1106,11 @@ class CompanionServer {
 
         // Notify desktop UI
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          this.mainWindow.webContents.send('pantry-updated', {
-            action: 'returned',
-            ingredient: ingredient,
-            qty: qty,
-            unit: unit
+          this.mainWindow.webContents.send('shopping-list:updated', {
+            action: 'removed',
+            itemId: itemId
           });
         }
-      } else {
-        console.error(`❌ Failed to return to pantry: ${result?.error || 'Unknown error'}`);
       }
     } catch (error) {
       console.error(`Error handling item removal from ${deviceId}:`, error);
@@ -1126,25 +1124,75 @@ class CompanionServer {
     try {
       const { ingredient, qty, unit, itemId } = message;
 
-      console.log(`📥 Item unmarked as purchased from ${client.deviceType}: ${ingredient} (${qty} ${unit})`);
+      console.log(`📥 Item unmarked as purchased: ${ingredient} (${qty} ${unit})`);
 
-      // Return item to pantry
+      // Subtract quantity from pantry (reverse of purchase)
+      const ingredientNorm = (ingredient || '').toLowerCase().trim();
+      const qtyNum = parseFloat(qty) || 0;
+
+      if (qtyNum > 0) {
+        const result = await handleApiCall({
+          fn: 'subtractFromPantry',
+          payload: {
+            ingredientNorm: ingredientNorm,
+            qty: qtyNum,
+            unit: unit || ''
+          },
+          store
+        });
+
+        if (result && result.ok) {
+          console.log(`✅ Subtracted from pantry: ${ingredient} (${result.deducted} ${result.unit})`);
+        } else {
+          console.log(`⚠️ Could not subtract from pantry: ${result?.reason || 'unknown'}`);
+        }
+      }
+
+      // Send confirmation to iPhone
+      client.ws.send(JSON.stringify({
+        type: 'item_unpurchased_confirmed',
+        itemId: itemId,
+        timestamp: new Date().toISOString()
+      }));
+
+      // Notify desktop UI
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        this.mainWindow.webContents.send('pantry-updated', {
+          action: 'unpurchased',
+          ingredient: ingredient
+        });
+      }
+    } catch (error) {
+      console.error(`Error handling item unpurchase:`, error);
+    }
+  }
+
+  async handleItemPurchased(deviceId, message) {
+    const client = this.clients.get(deviceId);
+    if (!client) return;
+
+    try {
+      const { ingredient, qty, unit, itemId } = message;
+
+      console.log(`📥 Item purchased from ${client.deviceType}: ${ingredient} (${qty} ${unit})`);
+
+      // Add purchased item to pantry
       const result = await handleApiCall({
-        fn: 'returnItemToPantry',
+        fn: 'markShoppingItemPurchased',
         payload: {
           ingredientNorm: ingredient,
-          qty: qty,
-          unit: unit
+          qty: parseFloat(qty) || 0,
+          unit: unit || ''
         },
         store
       });
 
       if (result && result.ok) {
-        console.log(`✅ Returned to pantry: ${ingredient} (${qty} ${unit})`);
+        console.log(`✅ Added to pantry: ${ingredient} (${qty} ${unit})`);
 
         // Send confirmation to iPhone
         client.ws.send(JSON.stringify({
-          type: 'item_unpurchased_confirmed',
+          type: 'item_purchased_confirmed',
           itemId: itemId,
           timestamp: new Date().toISOString()
         }));
@@ -1152,17 +1200,17 @@ class CompanionServer {
         // Notify desktop UI
         if (this.mainWindow && !this.mainWindow.isDestroyed()) {
           this.mainWindow.webContents.send('pantry-updated', {
-            action: 'returned',
+            action: 'purchased',
             ingredient: ingredient,
             qty: qty,
             unit: unit
           });
         }
       } else {
-        console.error(`❌ Failed to return to pantry: ${result?.error || 'Unknown error'}`);
+        console.error(`❌ Failed to add to pantry: ${result?.error || 'Unknown error'}`);
       }
     } catch (error) {
-      console.error(`Error handling item unpurchase from ${deviceId}:`, error);
+      console.error(`Error handling item purchase from ${deviceId}:`, error);
     }
   }
 

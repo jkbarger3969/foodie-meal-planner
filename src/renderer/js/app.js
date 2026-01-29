@@ -124,11 +124,11 @@ async function api(fn, payload) {
 }
 
 // ---------- META / common options ----------
-const DEFAULT_ING_CATEGORIES = ['Produce', 'Dairy', 'Meat', 'Seafood', 'Pantry', 'Snacks', 'Frozen', 'Bakery', 'Deli', 'Beverages', 'Household', 'Spice', 'Other'];
+const DEFAULT_ING_CATEGORIES = ['Produce', 'Dairy', 'Meat', 'Seafood', 'Pantry', 'Pasta', 'Snacks', 'Frozen', 'Bakery', 'Deli', 'Beverages', 'Household', 'Spice', 'Other'];
 
 const META = {
   qtyNumOptions: ['', '0.25', '0.5', '0.75', '1', '1.5', '2', '3', '4', '5', '6', '8', '10', '12'],
-  unitOptions: ['', 'tsp', 'tbsp', 'cup', 'oz', 'lb', 'g', 'kg', 'ml', 'l', 'pinch', 'clove', 'can', 'jar', 'package', 'bunch', 'slice', 'piece'],
+  unitOptions: ['', 'tsp', 'tbsp', 'cup', 'oz', 'lb', 'g', 'kg', 'ml', 'l', 'pinch', 'clove', 'can', 'jar', 'package', 'bunch', 'slice', 'piece', 'dozen'],
   categories: [''],  // Start empty, will be loaded from database
   categoriesLoaded: false  // Track if categories have been loaded from DB
 };
@@ -4841,7 +4841,7 @@ function renderShop_(groups) {
                         </div>
                         <div class="shop-item-actions">
                           <button class="ghost mini" data-action="shop-item-edit" title="Rename (Updates underlying recipes)">✏️ Edit</button>
-                          <button class="danger mini" data-action="shop-item-remove" data-ingredient="${escapeAttr(it.IngredientNorm)}" data-unit="${escapeAttr(it.Unit || '')}" data-qty="${escapeAttr(it.QtyNum || '')}" title="Remove and return to pantry">Remove</button>
+                          <button class="danger mini" data-action="shop-item-remove" data-sourceids="${escapeAttr(sourceIdsJson)}" data-ingredient="${escapeAttr(it.IngredientNorm)}" data-unit="${escapeAttr(it.Unit || '')}" data-qty="${escapeAttr(it.QtyNum || '')}" title="Remove from shopping list">Remove</button>
                         </div>
                       </div>
                     </div>
@@ -4987,7 +4987,8 @@ async function buildShop() {
                 Unit: ing.Unit || '',
                 QtyNum: 0,
                 QtyText: '',
-                Examples: []
+                Examples: [],
+                SourceIds: []
               };
               storeGroup.Items.push(bucket);
             }
@@ -4995,6 +4996,11 @@ async function buildShop() {
             // Aggregate quantity
             if (ing.QtyNum && Number.isFinite(Number(ing.QtyNum))) {
               bucket.QtyNum += Number(ing.QtyNum);
+            }
+
+            // Collect SourceIds (ItemIds)
+            if (ing.ItemId) {
+              bucket.SourceIds.push(ing.ItemId);
             }
 
             // Add example
@@ -5479,19 +5485,30 @@ document.addEventListener('click', async (e) => {
   // Handle remove button
   const removeBtn = e.target.closest('[data-action="shop-item-remove"]');
   if (removeBtn) {
-    const ingredientNorm = removeBtn.dataset.ingredient;
-    const unit = removeBtn.dataset.unit;
-    const qty = parseFloat(removeBtn.dataset.qty);
-
-    if (confirm(`Remove ${ingredientNorm} from shopping list and return to pantry (if applicable)?`)) {
-      const res = await api('returnItemToPantry', { ingredientNorm, qty, unit });
-      if (res.ok) {
-        showToast(`${ingredientNorm} removed.`, 'success');
-        buildShop(); // Refresh
-      } else {
-        showToast(res.error, 'error');
+    const ingredient = removeBtn.dataset.ingredient;
+    const sourceIdsRaw = removeBtn.dataset.sourceids;
+    
+    if (!confirm(`Remove "${ingredient}" from the shopping list?`)) return;
+    
+    // Remove from local SHOP.groups
+    if (SHOP.groups && Array.isArray(SHOP.groups)) {
+      for (const group of SHOP.groups) {
+        if (group.Items && Array.isArray(group.Items)) {
+          const idx = group.Items.findIndex(it => it.IngredientNorm === ingredient);
+          if (idx !== -1) {
+            group.Items.splice(idx, 1);
+            break;
+          }
+        }
       }
+      // Remove empty groups
+      SHOP.groups = SHOP.groups.filter(g => g.Items && g.Items.length > 0);
     }
+    
+    // Re-render and persist
+    renderShop_(SHOP.groups);
+    persistShop_();
+    showToast('Item removed from shopping list', 'success');
     return;
   }
 });
@@ -5750,8 +5767,8 @@ async function loadPantry() {
               <div class="muted" style="color: ${mutedColor};">${escapeHtml(it.Notes || '')}</div>
             </div>
             <div class="actions">
-              <button class="ghost" data-action="pantry-edit" data-id="${escapeAttr(it.ItemId)}" ${lowStock ? 'style="color: #000;"' : ''}>Edit</button>
-              <button class="danger" data-action="pantry-del" data-id="${escapeAttr(it.ItemId)}" ${lowStock ? 'style="color: #d32f2f;"' : ''}>Delete</button>
+              <button class="ghost" data-action="pantry-edit" data-id="${escapeAttr(String(it.ItemId || '').trim())}" ${lowStock ? 'style="color: #000;"' : ''}>Edit</button>
+              <button class="danger" data-action="pantry-del" data-id="${escapeAttr(String(it.ItemId || '').trim())}" ${lowStock ? 'style="color: #d32f2f;"' : ''}>Delete</button>
             </div>
           </div>
         </div>
@@ -9436,6 +9453,45 @@ function bindUi() {
       return;
     }
 
+    // Handle remove button
+    const removeBtn = e.target.closest('[data-action="shop-item-remove"]');
+    if (removeBtn) {
+      // Try to get IDs from dataset (dataset.sourceids should auto-parse if JSON? No, it's a string, need JSON.parse)
+      let ids = [];
+
+      // Check specific ID first
+      if (removeBtn.dataset.id) {
+        ids.push(removeBtn.dataset.id);
+      }
+      // Check source IDs (array)
+      else if (removeBtn.dataset.sourceids) {
+        try {
+          ids = JSON.parse(removeBtn.dataset.sourceids);
+        } catch (e) { console.error('Failed to parse sourceids', e); }
+      }
+
+      if (ids.length > 0) {
+        if (confirm(`Remove ${ids.length} item(s) from shopping list?`)) {
+          let successCount = 0;
+          for (const id of ids) {
+            const res = await api('deleteShoppingItem', { itemId: id });
+            if (res.ok) successCount++;
+          }
+
+          if (successCount > 0) {
+            showToast(`Removed ${successCount} item(s).`, 'success');
+            await buildShop(); // Refresh
+          } else {
+            showToast('Failed to remove items.', 'error');
+          }
+        }
+      } else {
+        // Fallback for old items or errors
+        console.error('Delete clicked but no Item IDs found');
+        showToast('Error: Cannot delete this item (missing ID)', 'error');
+      }
+      return;
+    }
     // Handle pantry edit buttons within insights (delegated)
     const editBtn = e.target.closest('[data-action="pantry-edit"]');
     if (editBtn) {
@@ -9486,13 +9542,24 @@ function bindUi() {
       if (r && r.ok) await loadPantry();
       return;
     }
+
     const del = e.target.closest('[data-action="pantry-del"]');
     if (del) {
-      const id = del.dataset.id;
-      if (!id) return;
+      const id = String(del.dataset.id || '').trim();
+      if (!id) {
+        return;
+      }
+
       if (!confirm('Delete pantry item?')) return;
-      await api('deletePantryItem', { itemId: id });
-      await loadPantry();
+
+      const res = await api('deletePantryItem', { itemId: id });
+
+      if (res.ok) {
+        showToast('Item deleted from pantry.', 'success');
+        await loadPantry();
+      } else {
+        showToast(`Failed to delete: ${res.error}`, 'error');
+      }
       return;
     }
   });

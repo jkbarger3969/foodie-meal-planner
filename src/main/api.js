@@ -200,6 +200,7 @@ function canonicalizeUnit_(u) {
     'bunch': 'bunch', 'bunches': 'bunch',
     'slice': 'slice', 'slices': 'slice',
     'piece': 'piece', 'pieces': 'piece',
+    'dozen': 'dozen', 'dozens': 'dozen', 'doz': 'dozen',
     'whole': 'whole', 'medium': 'medium', 'large': 'large', 'small': 'small'
   };
   return map[lower] || lower;
@@ -365,7 +366,8 @@ function canonicalUnit(u) {
     package: 'package', packages: 'package', pkg: 'package', pkgs: 'package',
     bunch: 'bunch', bunches: 'bunch',
     slice: 'slice', slices: 'slice',
-    piece: 'piece', pieces: 'piece'
+    piece: 'piece', pieces: 'piece',
+    dozen: 'dozen', dozens: 'dozen', doz: 'dozen'
   };
   return map[s] || s;
 }
@@ -869,6 +871,7 @@ async function handleApiCall({ fn, payload, store }) {
       case 'assignShoppingItemStore': return assignShoppingItemStore(payload);
       case 'returnItemToPantry': return returnItemToPantry(payload);
       case 'markShoppingItemPurchased': return markShoppingItemPurchased(payload);
+      case 'subtractFromPantry': return subtractFromPantry(payload);
 
       case 'updateShoppingItem':
         // Handle both use cases: ingredient normalization OR purchase status update
@@ -2836,6 +2839,29 @@ function markShoppingItemPurchased(payload) {
   });
 }
 
+// Subtract quantity from pantry (when item is unpurchased/unchecked on companion app)
+function subtractFromPantry(payload) {
+  const ingredientNorm = String(payload && payload.ingredientNorm || '').trim().toLowerCase();
+  const qty = Number(payload && payload.qty || 0);
+  const unit = String(payload && payload.unit || '').trim();
+
+  if (!ingredientNorm || !qty || qty <= 0) {
+    return err_('ingredientNorm and qty required.');
+  }
+
+  const baseUnit = canonicalUnit(unit) || 'piece';
+
+  const result = _deductFromPantry_(ingredientNorm, qty, baseUnit);
+
+  return ok_({
+    ingredient: ingredientNorm,
+    deducted: result.deducted,
+    unit: baseUnit,
+    reason: result.reason,
+    details: result.details || null
+  });
+}
+
 // Mark a meal as cooked and deduct ingredients from pantry
 function markMealCooked(payload) {
   const recipeId = String(payload && payload.recipeId || '').trim();
@@ -2963,7 +2989,7 @@ function listPantry(payload) {
 
   const items = rows.map(r => {
     const obj = {
-      ItemId: r.ItemId,
+      ItemId: String(r.ItemId || '').trim(),
       Name: r.Name,
       NameLower: r.NameLower,
       QtyText: r.QtyText || '',
@@ -3084,7 +3110,7 @@ function upsertPantryItem(payload) {
 function deletePantryItem(payload) {
   const itemId = String(payload && payload.itemId || '').trim();
   if (!itemId) return err_('itemId required.');
-  db().prepare("DELETE FROM pantry WHERE ItemId=?").run(itemId);
+  db().prepare("DELETE FROM pantry WHERE trim(ItemId)=?").run(itemId);
   return ok_({});
 }
 
