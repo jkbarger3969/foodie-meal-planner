@@ -8920,7 +8920,18 @@ function bindUi() {
   safeBind('btnAddRecipe', 'click', openRecipeModalNew);
   safeBind('btnQuickAddRecipe', 'click', openQuickAddModal);
   safeBind('btnImportRecipe', 'click', openImportRecipeModal);
-  safeBind('btnRefresh', 'click', resetAndLoadRecipes);
+  safeBind('btnRefresh', 'click', async () => {
+    // RESET filters (Search & Jump A-Z)
+    CURRENT_QUERY = '';
+    const searchInput = document.getElementById('recipeSearch');
+    if (searchInput) searchInput.value = '';
+
+    const jumpLetter = document.getElementById('jumpLetter');
+    if (jumpLetter) jumpLetter.value = '';
+
+    await resetAndLoadRecipes();
+    showToast('Filters cleared and recipes reloaded');
+  });
 
   // PHASE 3: Visual Import Preview Event Listeners
   const importInputs = [
