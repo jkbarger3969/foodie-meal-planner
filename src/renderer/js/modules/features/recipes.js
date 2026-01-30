@@ -81,9 +81,8 @@ export function renderRecipeCard_(r) {
     const starIcon = isFavorite ? '⭐' : '☆';
     const starColor = isFavorite ? '#ffd700' : 'var(--muted)';
 
-    // Mapping Cuisines/MealTypes to Emojis (subset for brevity, actual map in app.js is huge)
-    const cuisineEmojiMap = { 'Italian': '🍝', 'Mexican': '🌮', 'Chinese': '🥡' };
-    const recipeEmoji = cuisineEmojiMap[r.Cuisine] || '📖';
+    // Get emoji - try cuisine first, then meal type, then default
+    const recipeEmoji = (r.Cuisine && r.Cuisine !== 'Any') ? '🍽️' : '📖'; // Simplified for matches
 
     return `
     <div class="recipe-card animate-in" 
@@ -91,17 +90,29 @@ export function renderRecipeCard_(r) {
          data-recipe-id="${escapeAttr(r.RecipeId)}" 
          data-recipe-title="${escapeAttr(r.Title || '')}">
       
+      <!-- Pinterest Badge (Cuisine) -->
       ${r.Cuisine ? `<div class="recipe-card-badge">${escapeHtml(r.Cuisine)}</div>` : ''}
-      <div class="recipe-card-image" style="background-image: url('${escapeAttr(getRecipeImageUrl(r.Image_Name || r.Image))}')"></div>
       
+      <!-- Recipe Image (Lazy Loaded) -->
+      <div class="recipe-card-image" 
+           style="background-image: url('${escapeAttr(getRecipeImageUrl(r.Image_Name || r.Image))}'); background-color: #f0f0f0"></div>
+      
+      <!-- Quick Actions (Top Left) -->
       <div class="recipe-card-actions">
         <button class="card-action-btn" data-action="recipe-favorite" data-rid="${escapeAttr(r.RecipeId)}" 
-                title="${isFavorite ? 'Remove from favorites' : 'Add to favorites'}"
-                style="color: ${starColor}; z-index: 20; pointer-events: auto;">
+                data-tooltip="Toggle Favorite" data-tooltip-pos="bottom"
+                style="color: ${starColor}">
           ${starIcon}
         </button>
+        <button class="card-action-btn" data-action="quick-assign" data-rid="${escapeAttr(r.RecipeId)}" data-tooltip="Assign to date" data-tooltip-pos="bottom">📅</button>
+        <button class="card-action-btn" data-action="quick-collection" data-rid="${escapeAttr(r.RecipeId)}" data-tooltip="Add to collection" data-tooltip-pos="bottom">📦</button>
+        <label class="card-action-btn recipe-select-label" data-tooltip="Select for bulk actions" data-tooltip-pos="bottom">
+          <input type="checkbox" class="recipe-select-checkbox" data-recipe-id="${escapeAttr(r.RecipeId)}" />
+          <div class="checkmark-overlay"></div>
+        </label>
       </div>
 
+      <!-- Content Overlay -->
       <div class="recipe-card-overlay">
         <div class="recipe-card-title">${escapeHtml(r.Title || 'Untitled Recipe')}</div>
         <div class="recipe-card-meta">

@@ -707,7 +707,7 @@
                 <div class="filter-chip" data-meal-type="Dinner">Dinner</div>
                 <div class="filter-chip" data-meal-type="Side Dish">Side Dish</div>
                 <div class="filter-chip" data-meal-type="Appetizer">Appetizer</div>
-                <div class="filter-chip" data-meal-type="Snack">Snack</div>
+                <div class="filter-chip" data-meal-type="Sauce">Sauce</div>
                 <div class="filter-chip" data-meal-type="Dessert">Dessert</div>
                 <div class="filter-chip" data-meal-type="Beverage">Beverage</div>
               </div>
@@ -1060,6 +1060,21 @@
       <div class="muted" id="adminCategoriesStatus" style="margin-top:6px;"></div>
     </div>
 
+    <!-- Recipe Meal Categories -->
+    <div class="card">
+      <h2 style="margin:0 0 8px 0; font-size:16px;">Recipe Meal Categories</h2>
+      <div class="muted" style="margin-bottom:12px;">
+        Re-analyze and fix meal type categories (Breakfast, Lunch, Dinner, etc.) for all recipes based on recipe titles and keywords.
+      </div>
+      <div class="actions">
+        <button class="primary" id="btnRecategorizeAll">🔄 Fix All Meal Categories</button>
+        <span class="muted" id="recategorizeStatus"></span>
+      </div>
+      <div class="muted" style="margin-top:8px;">
+        This will convert old "Snack" categories and fix miscategorized recipes. Categories like "Sauce", "Appetizer", "Side Dish" will be properly assigned based on recipe titles.
+      </div>
+    </div>
+
     <!-- Stores Management -->
     <div class="card">
       <h2 style="margin:0 0 8px 0; font-size:16px;">Stores</h2>
@@ -1104,7 +1119,7 @@
 
           <!-- PHASE 8.2+: Warning help for backup/restore -->
           <div class="help-text warning" style="margin-bottom:12px;">
-            <strong>⚠️ Important:</strong> Importing data will replace your entire database. Always export a backup
+            <strong>Important:</strong> Importing data will replace your entire database. Always export a backup
             before importing to prevent data loss.
           </div>
 
@@ -1494,7 +1509,7 @@
             <option value="Dinner">Dinner</option>
             <option value="Side Dish">Side Dish</option>
             <option value="Appetizer">Appetizer</option>
-            <option value="Snack">Snack</option>
+            <option value="Sauce">Sauce</option>
             <option value="Dessert">Dessert</option>
             <option value="Beverage">Beverage</option>
           </select>
@@ -1609,7 +1624,7 @@
             <option value="Dinner">Dinner</option>
             <option value="Side Dish">Side Dish</option>
             <option value="Appetizer">Appetizer</option>
-            <option value="Snack">Snack</option>
+            <option value="Sauce">Sauce</option>
             <option value="Dessert">Dessert</option>
             <option value="Beverage">Beverage</option>
           </select>
@@ -1957,7 +1972,7 @@
                   <option value="Dinner">Dinner</option>
                   <option value="Side Dish">Side Dish</option>
                   <option value="Appetizer">Appetizer</option>
-                  <option value="Snack">Snack</option>
+                  <option value="Sauce">Sauce</option>
                   <option value="Dessert">Dessert</option>
                   <option value="Beverage">Beverage</option>
                 </select>

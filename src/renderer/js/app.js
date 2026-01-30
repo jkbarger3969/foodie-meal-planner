@@ -1186,7 +1186,8 @@ function updateRecipeCard(recipeId, updates) {
       if (btn) {
         btn.innerHTML = updates.is_favorite ? '★' : '☆';
         btn.style.color = updates.is_favorite ? '#ffd700' : 'var(--muted)';
-        btn.title = updates.is_favorite ? 'Remove from favorites' : 'Add to favorites';
+        btn.setAttribute('data-tooltip', 'Toggle Favorite');
+        btn.setAttribute('data-tooltip-pos', 'bottom');
       }
     }
 
@@ -1209,7 +1210,8 @@ function updateRecipeCard(recipeId, updates) {
     if (favBtn) {
       favBtn.innerHTML = updates.is_favorite ? '★' : '☆';
       favBtn.style.color = updates.is_favorite ? '#ffd700' : 'var(--muted)';
-      favBtn.title = updates.is_favorite ? 'Remove from favorites' : 'Add to favorites';
+      favBtn.setAttribute('data-tooltip', 'Toggle Favorite');
+      favBtn.setAttribute('data-tooltip-pos', 'bottom');
     }
   }
 }
@@ -1570,7 +1572,7 @@ function renderRecipeCard_(r) {
     'Brunch': '🥐',
     'Lunch': '🥗',
     'Dinner': '🍽️',
-    'Snack': '🍿',
+    'Sauce': '🥫',
     'Dessert': '🍰',
     'Appetizer': '🍤',
     'Side Dish': '🥔',
@@ -1597,12 +1599,15 @@ function renderRecipeCard_(r) {
       <!-- Quick Actions (Top Left) -->
       <div class="recipe-card-actions">
         <button class="card-action-btn" data-action="recipe-favorite" data-rid="${escapeAttr(r.RecipeId)}" 
-                title="${isFavorite ? 'Remove from favorites' : 'Add to favorites'}"
+                data-tooltip="Toggle Favorite" data-tooltip-pos="bottom"
                 style="color: ${starColor}">
           ${starIcon}
         </button>
-        <button class="card-action-btn" data-action="quick-assign" data-rid="${escapeAttr(r.RecipeId)}" title="Assign to date">📅</button>
-        <button class="card-action-btn" data-action="quick-collection" data-rid="${escapeAttr(r.RecipeId)}" title="Add to collection">📦</button>
+        <button class="card-action-btn" data-action="quick-assign" data-rid="${escapeAttr(r.RecipeId)}" data-tooltip="Assign to date" data-tooltip-pos="bottom">📅</button>
+        <button class="card-action-btn" data-action="quick-collection" data-rid="${escapeAttr(r.RecipeId)}" data-tooltip="Add to collection" data-tooltip-pos="bottom">📦</button>
+        <label class="card-action-btn recipe-select-label" data-tooltip="Select for bulk actions" data-tooltip-pos="bottom">
+          <input type="checkbox" class="recipe-select-checkbox" data-recipe-id="${escapeAttr(r.RecipeId)}" />
+        </label>
       </div>
 
       <!-- Content Overlay -->
@@ -1613,11 +1618,6 @@ function renderRecipeCard_(r) {
           ${r.PrepTimeMinutes ? `<span>• ⏱️ ${r.PrepTimeMinutes}m</span>` : ''}
         </div>
       </div>
-      
-      <!-- Hidden Checkbox for multi-select -->
-      <input type="checkbox" class="recipe-select-checkbox" 
-             style="position:absolute; top:12px; right:12px; z-index:10; opacity:0;" 
-             data-recipe-id="${escapeAttr(r.RecipeId)}" />
     </div>
   `;
 }
@@ -2066,7 +2066,8 @@ window.openRecipeModalView = async function (recipeId) {
       const isFav = (r.IsFavorite === true || r.IsFavorite === 1 || r.IsFavorite === '1');
       favBtn.innerHTML = isFav ? '★' : '☆';
       favBtn.style.color = isFav ? '#ffd700' : 'var(--muted)';
-      favBtn.title = isFav ? 'Remove from favorites' : 'Add to favorites';
+      favBtn.setAttribute('data-tooltip', 'Toggle Favorite');
+      favBtn.setAttribute('data-tooltip-pos', 'bottom');
     }
   } catch (err) {
     console.error('[openRecipeModalView] Error:', err);
@@ -2498,11 +2499,132 @@ async function deleteRecipeUi() {
   }
 }
 
+// ========== DEDICATED CHECKBOX HANDLER (CAPTURE PHASE) ==========
+// This runs BEFORE any other click handlers
+document.addEventListener('click', (e) => {
+  // Check if click is on checkbox/label area
+  const isCheckbox = e.target.classList.contains('recipe-select-checkbox');
+  const isLabel = e.target.classList.contains('recipe-select-label');
+  const labelParent = e.target.closest('.recipe-select-label');
+
+  // If not checkbox-related, ignore and let other handlers process
+  if (!isCheckbox && !isLabel && !labelParent) {
+    return;
+  }
+
+  // NUCLEAR OPTION: Stop this event from reaching ANY other handler
+  // BUT: Do not preventDefault if clicking the checkbox directly, or it won't toggle!
+  if (!isCheckbox) {
+    e.preventDefault();
+  }
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+
+  // Find the actual checkbox element
+  let checkbox = null;
+  if (isCheckbox) {
+    checkbox = e.target;
+  } else if (isLabel) {
+    checkbox = e.target.querySelector('.recipe-select-checkbox');
+  } else if (labelParent) {
+    checkbox = labelParent.querySelector('.recipe-select-checkbox');
+  }
+
+  if (!checkbox) {
+    console.error('🔴 [Checkbox Capture] Could not find checkbox element');
+    return;
+  }
+
+  // Toggle checkbox if clicking label (not the checkbox itself)
+  if (!isCheckbox) {
+    checkbox.checked = !checkbox.checked;
+  }
+
+  const isChecked = checkbox.checked;
+  const recipeId = checkbox.dataset.recipeId || checkbox.getAttribute('data-recipe-id');
+
+  // Update label styling
+  const label = checkbox.closest('.recipe-select-label');
+  if (label) {
+    label.classList.toggle('checked', isChecked);
+  }
+
+  // Update selection set
+  if (recipeId) {
+    if (isChecked) {
+      if (typeof SELECTED_RECIPES !== 'undefined') {
+        SELECTED_RECIPES.add(recipeId);
+      }
+    } else {
+      if (typeof SELECTED_RECIPES !== 'undefined') {
+        SELECTED_RECIPES.delete(recipeId);
+      }
+    }
+
+    // Update bulk action buttons
+    if (typeof updateRecipeExportControls === 'function') {
+      updateRecipeExportControls();
+    }
+  }
+
+}, true); // ← CRITICAL: 'true' = CAPTURE PHASE (runs before bubbling)
+
+
 // ---------- delegated handlers ----------
 // Recipe card clicks - only for clicking the card itself (not action buttons)
 document.addEventListener('click', async (e) => {
   // Skip if click is inside any modal or popover
   if (e.target.closest('.modalBack, .modal, .popover')) {
+    return;
+  }
+
+  // Handle recipe selection checkbox clicks FIRST
+  // (Handled by CAPTURE PHASE handler above)
+  if (false) {
+    // Find the checkbox
+    let checkbox;
+    if (isCheckbox) {
+      checkbox = e.target;
+    } else {
+      const label = e.target.closest('.recipe-select-label') || e.target;
+      checkbox = label.querySelector('.recipe-select-checkbox');
+    }
+
+    if (checkbox) {
+      // If clicking label (not checkbox directly), toggle the checkbox manually
+      if (!isCheckbox) {
+        checkbox.checked = !checkbox.checked;
+        e.preventDefault(); // Only prevent default if we handled the toggle manually
+      } else {
+        // Did click checkbox directly? e.preventDefault() would revert the native toggle!
+        // So we do NOT call it here.
+      }
+
+      const isChecked = checkbox.checked;
+
+      // Update the label styling
+      const label = checkbox.closest('.recipe-select-label');
+      if (label) {
+        if (isChecked) {
+          label.classList.add('checked');
+        } else {
+          label.classList.remove('checked');
+        }
+      }
+
+      // Update selection set
+      const recipeId = checkbox.dataset.recipeId;
+      if (recipeId) {
+        if (isChecked) {
+          SELECTED_RECIPES.add(recipeId);
+        } else {
+          SELECTED_RECIPES.delete(recipeId);
+        }
+        updateRecipeExportControls();
+      }
+    }
+
+    e.stopPropagation();
     return;
   }
 
@@ -2564,7 +2686,17 @@ document.addEventListener('click', async (e) => {
 
   const card = e.target.closest('.recipe-card');
 
-  // If clicked a recipe card (but not an action button), view the recipe
+  // DEFENSIVE CHECK: Don't open recipe if clicking checkbox/label area
+  const clickedCheckboxArea = e.target.closest('.recipe-select-label') ||
+    e.target.classList.contains('recipe-select-checkbox') ||
+    e.target.classList.contains('recipe-select-label');
+
+  if (clickedCheckboxArea) {
+    console.log('[Click] Blocked recipe open - checkbox area clicked');
+    return;  // Exit early, don't open recipe modal
+  }
+
+  // If clicked a recipe card (but not an action button or checkbox), view the recipe
   if (card) {
     e.preventDefault();
     e.stopPropagation();
@@ -4892,16 +5024,16 @@ async function buildShop() {
   const end = document.getElementById('shopEnd').value;
   const includeCollections = document.getElementById('shopIncludeCollections').checked;
   const selectedCollections = includeCollections ? getSelectedCollections() : [];
-  
+
   // Check if we have either date range OR collections selected
   const hasDateRange = start && end;
   const hasCollections = selectedCollections.length > 0;
-  
+
   if (!hasDateRange && !hasCollections) {
     document.getElementById('shopOut').innerHTML = `<div class="muted">Please select a date range or check "Include collections" and select collections.</div>`;
     return;
   }
-  
+
   SHOP.start = start || '';
   SHOP.end = end || '';
 
@@ -5009,7 +5141,7 @@ async function buildShop() {
         }
       }
     }
-    
+
     if (!hasDateRange && hasCollections) {
       showToast(`Shopping list generated from ${selectedCollections.length} collection(s)`, 'success');
     }
@@ -5592,9 +5724,9 @@ document.addEventListener('click', async (e) => {
   if (removeBtn) {
     const ingredient = removeBtn.dataset.ingredient;
     const sourceIdsRaw = removeBtn.dataset.sourceids;
-    
+
     if (!confirm(`Remove "${ingredient}" from the shopping list?`)) return;
-    
+
     // Remove from local SHOP.groups
     if (SHOP.groups && Array.isArray(SHOP.groups)) {
       for (const group of SHOP.groups) {
@@ -5609,7 +5741,7 @@ document.addEventListener('click', async (e) => {
       // Remove empty groups
       SHOP.groups = SHOP.groups.filter(g => g.Items && g.Items.length > 0);
     }
-    
+
     // Re-render and persist
     renderShop_(SHOP.groups);
     persistShop_();
@@ -10809,9 +10941,10 @@ function bindUi() {
   document.getElementById('btnBulkCollection').addEventListener('click', bulkAddToCollection);
   document.getElementById('btnBulkEdit').addEventListener('click', bulkEditRecipes);
   document.getElementById('btnBulkDelete').addEventListener('click', bulkDeleteRecipes);
+  document.getElementById('btnRecategorizeAll').addEventListener('click', recategorizeAllRecipes);
 
-  // Recipe checkbox delegation
-  document.getElementById('recipesList').addEventListener('change', handleRecipeCheckboxChange);
+  // Recipe checkbox delegation - DISABLED: Checkbox handling is done in the main click handler (lines 2505-2555)
+  // document.getElementById('recipesList').addEventListener('change', handleRecipeCheckboxChange);
 
   // Meal plan export
   document.getElementById('btnExportMealPlan').addEventListener('click', exportMealPlan);
@@ -11083,6 +11216,12 @@ function handleRecipeCheckboxChange(e) {
   const recipeId = checkbox.getAttribute('data-recipe-id');
   if (!recipeId) return;
 
+  // Toggle checked class on parent label for styling
+  const label = checkbox.closest('.recipe-select-label');
+  if (label) {
+    label.classList.toggle('checked', checkbox.checked);
+  }
+
   if (checkbox.checked) {
     SELECTED_RECIPES.add(recipeId);
   } else {
@@ -11097,6 +11236,8 @@ function selectAllRecipes() {
   const checkboxes = document.querySelectorAll('.recipe-select-checkbox');
   checkboxes.forEach(cb => {
     cb.checked = true;
+    const label = cb.closest('.recipe-select-label');
+    if (label) label.classList.add('checked');
     const recipeId = cb.getAttribute('data-recipe-id');
     if (recipeId) SELECTED_RECIPES.add(recipeId);
   });
@@ -11108,6 +11249,8 @@ function deselectAllRecipes() {
   const checkboxes = document.querySelectorAll('.recipe-select-checkbox');
   checkboxes.forEach(cb => {
     cb.checked = false;
+    const label = cb.closest('.recipe-select-label');
+    if (label) label.classList.remove('checked');
   });
   SELECTED_RECIPES.clear();
   updateRecipeExportControls();
@@ -11135,6 +11278,9 @@ async function exportSelectedRecipes() {
     showToast(`Export error: ${error.message}`, 'error');
   }
 }
+
+// REMOVED: Conflicting click handler for recipe selection labels
+// Native label behavior + document-level change event delegation is sufficient
 
 // Export collection handler
 async function exportCollectionHandler(collectionId) {
@@ -11503,7 +11649,7 @@ async function bulkEditRecipes() {
 
   // Load cuisines
   const cuisines = await getCuisinesList();
-  const mealTypes = ['Breakfast', 'Brunch', 'Lunch', 'Dinner', 'Side Dish', 'Appetizer', 'Snack', 'Dessert', 'Beverage', 'Any'];
+  const mealTypes = ['Breakfast', 'Brunch', 'Lunch', 'Dinner', 'Side Dish', 'Appetizer', 'Sauce', 'Dessert', 'Beverage', 'Any'];
 
   // Create modal for bulk edit
   const modalHtml = `
@@ -11612,6 +11758,65 @@ async function executeBulkEdit() {
   // Refresh recipes list
   await resetAndLoadRecipes();
   deselectAllRecipes();
+}
+
+// Recategorize All: Re-analyze meal types for all recipes
+async function recategorizeAllRecipes() {
+  const confirmation = confirm(
+    'Re-analyze meal categories for all recipes?\n\n' +
+    'This will:\n' +
+    '• Convert old "Snack" category to appropriate types\n' +
+    '• Fix recipes with "Any" that should have a specific category\n' +
+    '• Update miscategorized recipes based on title keywords\n\n' +
+    'Continue?'
+  );
+  if (!confirmation) return;
+
+  const statusEl = document.getElementById('recategorizeStatus');
+  const btn = document.getElementById('btnRecategorizeAll');
+
+  if (statusEl) statusEl.textContent = 'Analyzing...';
+  if (btn) btn.disabled = true;
+
+  showToast('Analyzing recipes...', 'info');
+
+  try {
+    const res = await api('recategorizeAllRecipes', {});
+
+    if (res.ok) {
+      const { total, updated, unchanged, changes } = res;
+
+      if (statusEl) statusEl.textContent = `Done: ${updated} updated, ${unchanged} unchanged`;
+
+      if (updated > 0) {
+        let message = `Updated ${updated} of ${total} recipes.\n\nExamples:`;
+        const examples = changes.slice(0, 8);
+        for (const change of examples) {
+          message += `\n• "${change.title}": ${change.from} → ${change.to}`;
+        }
+        if (changes.length > 8) {
+          message += `\n... and ${changes.length - 8} more`;
+        }
+
+        showToast(`Recategorized ${updated} recipes`, 'success');
+        alert(message);
+
+        // Reload recipes to show updated categories
+        await loadAllRecipes();
+        resetAndLoadRecipes();
+      } else {
+        showToast('All recipes already have correct categories', 'info');
+      }
+    } else {
+      if (statusEl) statusEl.textContent = `Error: ${res.error}`;
+      showToast(`Error: ${res.error}`, 'error');
+    }
+  } catch (err) {
+    if (statusEl) statusEl.textContent = `Error: ${err.message}`;
+    showToast(`Error: ${err.message}`, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // Bulk Delete: Delete selected recipes with confirmation
@@ -15189,6 +15394,103 @@ document.addEventListener('contextmenu', (e) => {
     }
   }
 });
+
+/**
+ * Show modal to quickly assign a recipe to a date
+ */
+async function showQuickAssignModal(recipeId, defaultDate = null) {
+  return new Promise(async (resolve) => {
+    const today = defaultDate || new Date().toISOString().split('T')[0];
+
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.7);z-index:9999;';
+
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:var(--bg);border-radius:12px;padding:24px;max-width:400px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.5);';
+
+    modal.innerHTML = `
+      <h3 style="margin:0 0 16px 0;font-size:18px;color:var(--fg);">Assign Recipe to Date</h3>
+      <div style="margin-bottom:16px;">
+        <label style="display:block;margin-bottom:6px;font-size:13px;color:var(--muted);">Date</label>
+        <input type="date" id="quick-assign-date" value="${today}" 
+               style="width:100%;padding:10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);" />
+      </div>
+      <div style="margin-bottom:16px;">
+        <label style="display:block;margin-bottom:6px;font-size:13px;color:var(--muted);">Meal Slot</label>
+        <select id="quick-assign-slot" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);">
+          <option value="breakfast">Breakfast</option>
+          <option value="lunch">Lunch</option>
+          <option value="dinner" selected>Dinner</option>
+          <option value="snack">Snack</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button id="cancel-quick-assign" class="ghost">Cancel</button>
+        <button id="confirm-quick-assign" class="primary">Assign</button>
+      </div>
+    `;
+
+    ov.appendChild(modal);
+    document.body.appendChild(ov);
+
+    const closeModal = () => {
+      ov.remove();
+      resolve(null);
+    };
+
+    ov.addEventListener('click', (e) => {
+      if (e.target === ov) closeModal();
+    });
+
+    document.getElementById('cancel-quick-assign').addEventListener('click', closeModal);
+
+    document.getElementById('confirm-quick-assign').addEventListener('click', async () => {
+      const date = document.getElementById('quick-assign-date').value;
+      const slot = document.getElementById('quick-assign-slot').value;
+
+      if (!date) {
+        showToast('Please select a date', 'warning');
+        return;
+      }
+
+      try {
+        const recipeRes = await api('getRecipe', { recipeId });
+        if (!recipeRes.ok || !recipeRes.recipe) {
+          showToast('Recipe not found', 'error');
+          closeModal();
+          return;
+        }
+
+        const recipe = recipeRes.recipe;
+        const meal = { RecipeId: recipeId, Title: recipe.Title };
+
+        const result = await upsertUserMeal(date, slot, meal);
+
+        if (result && result.ok) {
+          showToast(`Assigned "${recipe.Title}" to ${date} (${slot})`, 'success');
+
+          // Refresh plan view if visible
+          if (PLAN.start) {
+            await loadPlansIntoUi(PLAN.start, PLAN.days);
+          }
+
+          // Refresh dashboard if assigned to today
+          const todayStr = new Date().toISOString().split('T')[0];
+          if (date === todayStr) {
+            await refreshDashboardIfToday(date);
+          }
+        } else {
+          showToast(result?.error || 'Failed to assign recipe', 'error');
+        }
+      } catch (err) {
+        console.error('[showQuickAssignModal] Error:', err);
+        showToast('Failed to assign recipe', 'error');
+      }
+
+      closeModal();
+    });
+  });
+}
 
 /**
  * Show modal to add recipe to a collection

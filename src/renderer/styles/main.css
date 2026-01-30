@@ -367,6 +367,8 @@
       left: 16px;
       display: flex;
       gap: 8px;
+      align-items: center;
+      /* Fix alignment */
       opacity: 1;
       transform: translateY(0);
       transition: all 0.3s ease;
@@ -381,9 +383,11 @@
       transform: translateY(0);
     }
 
+    /* Recipe Actions & Selection UI */
+    /* Recipe Actions & Selection UI */
     .card-action-btn {
-      width: 36px;
-      height: 36px;
+      width: 36px !important;
+      height: 36px !important;
       border-radius: 12px;
       background: rgba(0, 0, 0, 0.6);
       -webkit-backdrop-filter: var(--glass-blur);
@@ -394,11 +398,15 @@
       justify-content: center;
       color: #fff;
       cursor: pointer;
-      transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+      transition: all 0.2s ease;
       font-size: 18px;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-      /* GPU acceleration for smoother animations */
       transform: translateZ(0);
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      flex-shrink: 0;
+      position: relative;
     }
 
     .card-action-btn:hover {
@@ -406,12 +414,111 @@
       border-color: var(--accent);
       color: #000;
       transform: scale(1.1) translateZ(0);
-      /* Only use will-change on hover to avoid memory overhead */
-      will-change: transform;
     }
 
     .card-action-btn[data-action="recipe-favorite"] {
       font-size: 20px;
+    }
+
+    /* Selection Checkbox using Label Wrapper */
+    .recipe-card-actions .recipe-select-label {
+      padding: 0 !important;
+      margin: 0 !important;
+      overflow: hidden;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      width: 36px !important;
+      height: 36px !important;
+      min-height: 0 !important;
+      max-height: 36px !important;
+      position: relative;
+    }
+
+    /* Unchecked state - show empty box icon */
+    .recipe-card-actions .recipe-select-label::after {
+      content: '☐';
+      font-size: 20px;
+      position: absolute;
+      z-index: 5;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      color: #fff;
+      display: block;
+    }
+
+    .recipe-card-actions .recipe-select-checkbox {
+      opacity: 0;
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      cursor: pointer;
+      margin: 0;
+      padding: 0;
+      z-index: 10;
+      appearance: none;
+      -webkit-appearance: none;
+      min-height: 0 !important;
+      top: 0;
+      left: 0;
+    }
+
+    /* Checked state - show checkmark (using SVG background for fail-safe visibility) */
+    .recipe-card-actions .recipe-select-label.checked {
+      background-color: var(--accent) !important;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") !important;
+      background-position: center !important;
+      background-repeat: no-repeat !important;
+      background-size: 22px !important;
+      border-color: var(--accent) !important;
+      box-shadow: 0 0 10px var(--accent);
+    }
+
+    /* Checkmark Overlay (Physical Element) */
+    .recipe-card-actions .checkmark-overlay {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 10px;
+      /* Bigger touch target visually */
+      height: 18px;
+      border: solid #fff;
+      border-width: 0 3px 3px 0;
+      transform: translate(-50%, -60%) rotate(45deg);
+      opacity: 0;
+      /* Hidden by default */
+      transition: opacity 0.1s ease;
+      z-index: 15;
+      /* Above input */
+      pointer-events: none;
+      /* Let clicks pass */
+    }
+
+    /* Show when checked */
+    .recipe-card-actions .recipe-select-label.checked .checkmark-overlay {
+      opacity: 1;
+    }
+
+    /* Cleanup old pseudo-element styles to avoid ghosts */
+    .recipe-card-actions .recipe-select-label::after {
+      display: none !important;
+    }
+
+    /* Hover state */
+    .recipe-card-actions .recipe-select-label:hover {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .recipe-card-actions .recipe-select-label:hover::after {
+      color: #000;
+    }
+
+    .recipe-card:has(.recipe-select-label.checked) {
+      outline: 3px solid var(--accent);
+      outline-offset: -3px;
     }
 
     .row {
@@ -3695,17 +3802,7 @@
 
     /* ============= PHASE 6.2: SELECTIVE EXPORT ============= */
 
-    /* Recipe selection checkbox */
-    .recipe-select-checkbox {
-      position: absolute;
-      top: 12px;
-      left: 12px;
-      width: 20px;
-      height: 20px;
-      cursor: pointer;
-      z-index: 10;
-      accent-color: var(--accent);
-    }
+
 
     /* Export controls bar */
     .export-controls {

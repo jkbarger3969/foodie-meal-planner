@@ -853,6 +853,7 @@ async function handleApiCall({ fn, payload, store }) {
       case 'searchRecipesFuzzy': return searchRecipesFuzzy(payload);
       case 'getRecipeSuggestionsFromPantry': return getRecipeSuggestionsFromPantry(payload);
       case 'importRecipeFromUrl': return importRecipeFromUrl(payload);
+      case 'recategorizeAllRecipes': return recategorizeAllRecipes();
 
       case 'getPlansRange': return getPlansRange(payload);
       case 'upsertPlanMeal': return upsertPlanMeal(payload);
@@ -1453,28 +1454,198 @@ function detectCuisine(recipeData) {
 }
 
 function detectMealType(recipeData) {
-  const keywords = [
-    recipeData.recipeCategory,
-    recipeData.keywords,
-    recipeData.name,
-    recipeData.description
-  ].filter(Boolean).join(' ').toLowerCase();
+  const title = (recipeData.name || '').toLowerCase();
+  const category = (recipeData.recipeCategory || '').toLowerCase();
+  const keywords = (recipeData.keywords || '').toLowerCase();
+  const description = (recipeData.description || '').toLowerCase();
+  const allText = `${title} ${category} ${keywords} ${description}`;
 
-  const mealTypeMap = {
-    'Breakfast': ['breakfast', 'brunch', 'morning', 'pancake', 'waffle', 'omelette', 'cereal', 'muffin', 'bagel'],
-    'Lunch': ['lunch', 'sandwich', 'wrap', 'salad', 'soup'],
-    'Dinner': ['dinner', 'entree', 'main course', 'supper'],
-    'Snack': ['snack', 'appetizer', 'hors d\'oeuvre', 'finger food', 'dip'],
-    'Dessert': ['dessert', 'cake', 'cookie', 'pie', 'ice cream', 'pudding', 'brownie', 'tart', 'sweet']
-  };
+  // Priority-ordered meal type detection (more specific patterns first)
+  const mealTypePatterns = [
+    // Sauce - very specific, check first
+    ['Sauce', [
+      'sauce', 'gravy', 'dressing', 'marinade', 'glaze', 'aioli', 'pesto',
+      'vinaigrette', 'salsa', 'chutney', 'relish', 'coulis', 'roux',
+      'hollandaise', 'béarnaise', 'béchamel', 'chimichurri', 'tzatziki',
+      'hummus', 'guacamole', 'tapenade', 'remoulade', 'tartar sauce'
+    ]],
+    // Beverage
+    ['Beverage', [
+      'beverage', 'drink', 'smoothie', 'juice', 'cocktail', 'mocktail',
+      'lemonade', 'tea', 'coffee', 'milkshake', 'shake', 'punch', 'cider',
+      'hot chocolate', 'eggnog', 'sangria', 'margarita', 'mojito'
+    ]],
+    // Dessert - check before main meals
+    ['Dessert', [
+      'dessert', 'cake', 'cookie', 'cookies', 'pie', 'tart', 'ice cream',
+      'pudding', 'brownie', 'cupcake', 'cheesecake', 'chocolate', 'fudge',
+      'candy', 'truffle', 'mousse', 'soufflé', 'souffle', 'custard',
+      'cobbler', 'crisp', 'crumble', 'pavlova', 'tiramisu', 'sweet',
+      'pastry', 'pastries', 'donut', 'doughnut', 'eclair', 'macaron',
+      'baklava', 'churro', 'gelato', 'sorbet', 'parfait', 'meringue'
+    ]],
+    // Breakfast - check before lunch/dinner
+    ['Breakfast', [
+      'breakfast', 'brunch', 'morning', 'pancake', 'pancakes', 'waffle',
+      'waffles', 'omelette', 'omelet', 'frittata', 'cereal', 'oatmeal',
+      'porridge', 'granola', 'muffin', 'muffins', 'bagel', 'toast',
+      'french toast', 'eggs benedict', 'scrambled eggs', 'fried eggs',
+      'hash brown', 'hashbrown', 'bacon and eggs', 'breakfast burrito',
+      'breakfast sandwich', 'crepe', 'crepes', 'biscuits and gravy'
+    ]],
+    // Side Dish
+    ['Side Dish', [
+      'side dish', 'side', 'sides', 'accompaniment', 'mashed potato',
+      'baked potato', 'roasted vegetables', 'steamed', 'coleslaw',
+      'corn on the cob', 'green beans', 'rice pilaf', 'bread roll',
+      'garlic bread', 'cornbread', 'stuffing', 'macaroni and cheese',
+      'mac and cheese', 'baked beans', 'collard greens'
+    ]],
+    // Appetizer
+    ['Appetizer', [
+      'appetizer', 'appetiser', 'starter', 'hors d\'oeuvre', 'finger food',
+      'canapé', 'canape', 'bruschetta', 'crostini', 'spring roll',
+      'egg roll', 'dumpling', 'gyoza', 'potsticker', 'wonton', 'samosa',
+      'empanada', 'ceviche', 'carpaccio', 'tartare', 'deviled egg',
+      'stuffed mushroom', 'cheese ball', 'spinach dip', 'buffalo wings',
+      'mozzarella stick', 'jalapeño popper', 'loaded potato skins'
+    ]],
+    // Soup (categorize as Lunch)
+    ['Lunch', [
+      'soup', 'stew', 'chowder', 'bisque', 'chili', 'gumbo', 'gazpacho',
+      'minestrone', 'pho', 'ramen', 'udon', 'borscht'
+    ]],
+    // Lunch
+    ['Lunch', [
+      'lunch', 'sandwich', 'sandwiches', 'wrap', 'wraps', 'panini',
+      'sub', 'hoagie', 'club sandwich', 'blt', 'grilled cheese',
+      'quesadilla', 'taco', 'tacos', 'burrito', 'bowl', 'poke bowl',
+      'buddha bowl', 'grain bowl', 'light meal', 'quick meal'
+    ]],
+    // Salad (categorize as Lunch unless clearly a side)
+    ['Lunch', [
+      'salad', 'caesar salad', 'greek salad', 'cobb salad', 'chef salad',
+      'nicoise', 'waldorf', 'caprese'
+    ]],
+    // Dinner - main dishes
+    ['Dinner', [
+      'dinner', 'entree', 'entrée', 'main course', 'main dish', 'supper',
+      'roast', 'roasted', 'grilled', 'baked chicken', 'baked fish',
+      'steak', 'ribeye', 'sirloin', 'filet', 'prime rib', 'pot roast',
+      'meatloaf', 'lasagna', 'casserole', 'curry', 'stir fry', 'stir-fry',
+      'fried rice', 'pad thai', 'teriyaki', 'beef', 'pork', 'lamb',
+      'chicken breast', 'salmon', 'shrimp', 'lobster', 'crab',
+      'pasta', 'spaghetti', 'fettuccine', 'linguine', 'penne', 'rigatoni',
+      'carbonara', 'bolognese', 'alfredo', 'primavera', 'marinara',
+      'risotto', 'paella', 'biryani', 'tikka masala', 'butter chicken',
+      'kung pao', 'general tso', 'orange chicken', 'sweet and sour',
+      'meatball', 'schnitzel', 'cordon bleu', 'wellington', 'piccata',
+      'marsala', 'parmesan', 'parmigiana', 'enchilada', 'fajita',
+      'jambalaya', 'étouffée', 'etouffee', 'stroganoff', 'bourguignon',
+      'coq au vin', 'osso buco', 'braised', 'slow cooker', 'instant pot',
+      'one pot', 'sheet pan', 'skillet'
+    ]]
+  ];
 
-  for (const [mealType, terms] of Object.entries(mealTypeMap)) {
-    if (terms.some(term => keywords.includes(term))) {
+  // Check title first with higher priority (most reliable)
+  for (const [mealType, terms] of mealTypePatterns) {
+    if (terms.some(term => title.includes(term))) {
+      return mealType;
+    }
+  }
+
+  // Check category field (often reliable from recipe schema)
+  for (const [mealType, terms] of mealTypePatterns) {
+    if (terms.some(term => category.includes(term))) {
+      return mealType;
+    }
+  }
+
+  // Check keywords and description
+  for (const [mealType, terms] of mealTypePatterns) {
+    if (terms.some(term => allText.includes(term))) {
       return mealType;
     }
   }
 
   return 'Any';
+}
+
+/**
+ * Recategorize all recipes based on improved keyword matching
+ * Also converts legacy "Snack" to "Sauce" or appropriate category
+ */
+function recategorizeAllRecipes() {
+  try {
+    const recipes = db().prepare("SELECT RecipeId, Title, Notes, MealType FROM recipes").all();
+    
+    if (!recipes || recipes.length === 0) {
+      return ok_({ total: 0, updated: 0, unchanged: 0, changes: [] });
+    }
+
+    let updated = 0;
+    let unchanged = 0;
+    const changes = [];
+
+    // Use a transaction for better performance and atomicity
+    const updateStmt = db().prepare("UPDATE recipes SET MealType = ? WHERE RecipeId = ?");
+    
+    const runUpdates = db().transaction(() => {
+      for (const recipe of recipes) {
+        try {
+          const recipeData = {
+            name: recipe.Title || '',
+            recipeCategory: '',
+            keywords: '',
+            description: recipe.Notes || ''
+          };
+
+          const newMealType = detectMealType(recipeData);
+          const oldMealType = (recipe.MealType || 'Any').trim();
+
+          // Determine final meal type
+          let finalMealType = newMealType;
+          
+          // Convert legacy "Snack" to appropriate category
+          if (oldMealType === 'Snack') {
+            finalMealType = newMealType !== 'Any' ? newMealType : 'Appetizer';
+          }
+
+          // Only update if we found a better category or converting from Snack
+          const shouldUpdate = (oldMealType === 'Snack') || 
+                               (oldMealType === 'Any' && finalMealType !== 'Any') ||
+                               (newMealType !== 'Any' && newMealType !== oldMealType);
+
+          if (shouldUpdate && finalMealType) {
+            updateStmt.run(finalMealType, recipe.RecipeId);
+            changes.push({
+              title: recipe.Title || 'Untitled',
+              from: oldMealType,
+              to: finalMealType
+            });
+            updated++;
+          } else {
+            unchanged++;
+          }
+        } catch (recipeErr) {
+          console.error(`[recategorizeAllRecipes] Error processing recipe ${recipe.RecipeId}:`, recipeErr);
+          unchanged++;
+        }
+      }
+    });
+
+    runUpdates();
+
+    return ok_({
+      total: recipes.length,
+      updated,
+      unchanged,
+      changes: changes.slice(0, 100) // Limit to first 100 changes for response size
+    });
+  } catch (err) {
+    console.error('[recategorizeAllRecipes] Error:', err);
+    return err_(err.message || 'Failed to recategorize recipes');
+  }
 }
 
 function findSystemChrome() {
