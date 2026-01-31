@@ -11227,7 +11227,7 @@ function bindUi() {
       const collectionName = sendToIpad.dataset.cname;
       try {
         showToast('Sending collection to iPad...', 'info');
-        const result = await window.api.sendCollectionToTablet(collectionId);
+        const result = await window.Foodie.sendCollectionToTablet(collectionId);
         if (result && result.ok) {
           let msg = `Collection "${collectionName}" sent to iPad (${result.sentCount} recipes)`;
           if (result.truncated) {

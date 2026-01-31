@@ -64,6 +64,7 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showRecipeList = false
     @State private var showCookMode = false
+    @State private var recipeListInitialTab = 0
     
     var body: some View {
         NavigationView {
@@ -163,31 +164,46 @@ struct ContentView: View {
                         // Content summary
                         if hasAnyContent {
                             VStack(spacing: AppSpacing.md) {
-                                // Stats row
+                                // Stats row - tappable to navigate
                                 HStack(spacing: AppSpacing.xl) {
                                     StatBadge(
                                         icon: "calendar",
                                         count: recipeStore.availableMealSlots.count + recipeStore.availableRecipes.count,
                                         label: "Meals",
-                                        color: AppColors.accent
+                                        color: AppColors.accent,
+                                        action: {
+                                            recipeListInitialTab = 0
+                                            showRecipeList = true
+                                        }
                                     )
                                     StatBadge(
                                         icon: "tray.full",
                                         count: recipeStore.sentRecipes.count,
                                         label: "Sent",
-                                        color: AppColors.info
+                                        color: AppColors.info,
+                                        action: {
+                                            recipeListInitialTab = 1
+                                            showRecipeList = true
+                                        }
                                     )
                                     StatBadge(
                                         icon: "folder.fill",
                                         count: recipeStore.collections.count,
                                         label: "Collections",
-                                        color: AppColors.warning
+                                        color: AppColors.warning,
+                                        action: {
+                                            recipeListInitialTab = 2
+                                            showRecipeList = true
+                                        }
                                     )
                                 }
                                 .padding(.top, AppSpacing.md)
                                 
                                 // Quick action buttons
-                                Button(action: { showRecipeList = true }) {
+                                Button(action: {
+                                    recipeListInitialTab = 0
+                                    showRecipeList = true
+                                }) {
                                     HStack(spacing: AppSpacing.md) {
                                         Image(systemName: "book.fill")
                                         Text("View All Recipes")
@@ -235,7 +251,7 @@ struct ContentView: View {
             SettingsView()
         }
         .sheet(isPresented: $showRecipeList) {
-            RecipeListView()
+            RecipeListView(initialTab: recipeListInitialTab)
         }
         .fullScreenCover(isPresented: $showCookMode) {
             CookModeView()
@@ -279,6 +295,8 @@ struct ContentView: View {
 struct RecipeListView: View {
     @EnvironmentObject var recipeStore: RecipeStore
     @Environment(\.dismiss) var dismiss
+    
+    var initialTab: Int = 0
     
     @State private var selectedTab = 0
     @State private var expandedSlots: Set<String> = []
@@ -387,6 +405,9 @@ struct RecipeListView: View {
             } message: {
                 Text(clearDialogMessage)
             }
+        }
+        .onAppear {
+            selectedTab = initialTab
         }
     }
     
@@ -791,27 +812,32 @@ struct StatBadge: View {
     let count: Int
     let label: String
     var color: Color = AppColors.accent
+    var action: (() -> Void)? = nil
     
     var body: some View {
-        VStack(spacing: AppSpacing.sm) {
-            ZStack {
-                Circle()
-                    .fill(color.opacity(0.15))
-                    .frame(width: 50, height: 50)
+        Button(action: { action?() }) {
+            VStack(spacing: AppSpacing.sm) {
+                ZStack {
+                    Circle()
+                        .fill(color.opacity(0.15))
+                        .frame(width: 50, height: 50)
+                    
+                    Image(systemName: icon)
+                        .font(.system(size: 22))
+                        .foregroundColor(color)
+                }
                 
-                Image(systemName: icon)
-                    .font(.system(size: 22))
-                    .foregroundColor(color)
+                Text("\(count)")
+                    .font(AppTypography.titleSmall)
+                    .foregroundColor(AppColors.textPrimary)
+                
+                Text(label)
+                    .font(AppTypography.caption)
+                    .foregroundColor(AppColors.textMuted)
             }
-            
-            Text("\(count)")
-                .font(AppTypography.titleSmall)
-                .foregroundColor(AppColors.textPrimary)
-            
-            Text(label)
-                .font(AppTypography.caption)
-                .foregroundColor(AppColors.textMuted)
         }
+        .buttonStyle(.plain)
+        .opacity(action != nil ? 1 : 0.8)
     }
 }
 

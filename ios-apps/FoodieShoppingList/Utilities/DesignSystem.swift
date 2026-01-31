@@ -27,11 +27,11 @@ struct AppColors {
     static let glassBg = Color.white.opacity(0.03)
     static let overlayBg = Color.black.opacity(0.5)
     
-    // Text
-    static let textPrimary = Color(hex: "#f1f5f9")
-    static let textSecondary = Color(hex: "#cbd5e1")
-    static let textMuted = Color(hex: "#94a3b8")
-    static let textDisabled = Color(hex: "#64748b")
+    // Text - Using system adaptive colors for light/dark mode compatibility
+    static let textPrimary = Color.primary
+    static let textSecondary = Color.secondary
+    static let textMuted = Color.gray
+    static let textDisabled = Color.gray.opacity(0.5)
     
     // Borders
     static let border = Color(hex: "#334155")
