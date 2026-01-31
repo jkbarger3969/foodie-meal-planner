@@ -99,6 +99,39 @@ struct AdditionalItem: Identifiable, Codable, Equatable {
     }
 }
 
+// MARK: - Recipe Collection (sent from desktop)
+
+struct RecipeCollection: Identifiable, Codable, Equatable {
+    let id: String
+    let name: String
+    var recipes: [Recipe]
+    let receivedAt: Date
+    
+    init(id: String, name: String, recipes: [Recipe], receivedAt: Date = Date()) {
+        self.id = id
+        self.name = name
+        self.recipes = recipes
+        self.receivedAt = receivedAt
+    }
+    
+    init?(from dict: [String: Any]) {
+        guard let id = dict["id"] as? String,
+              let name = dict["name"] as? String else {
+            return nil
+        }
+        
+        self.id = id
+        self.name = name
+        self.receivedAt = Date()
+        
+        if let recipesData = dict["recipes"] as? [[String: Any]] {
+            self.recipes = recipesData.compactMap { Recipe(from: $0) }
+        } else {
+            self.recipes = []
+        }
+    }
+}
+
 // MARK: - Recipe
 
 struct Recipe: Identifiable, Codable, Equatable {

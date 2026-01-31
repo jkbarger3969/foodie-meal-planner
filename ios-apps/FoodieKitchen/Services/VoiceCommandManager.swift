@@ -3,6 +3,12 @@ import Speech
 import AVFoundation
 import Combine
 
+enum ListeningMode: String, CaseIterable {
+    case wakeWord = "Wake Word"
+    case pushToTalk = "Push to Talk"
+    case disabled = "Disabled"
+}
+
 class VoiceCommandManager: ObservableObject {
     @Published var isListening = false
     @Published var isWaitingForCommand = false  // After wake word detected
@@ -10,6 +16,13 @@ class VoiceCommandManager: ObservableObject {
     @Published var lastCommand = ""
     @Published var lastRecognizedText = ""
     @Published var isAuthorized = false
+    @Published var listeningMode: ListeningMode = .wakeWord
+    @Published var isPushToTalkActive = false
+    @Published var voiceError: String? = nil  // Show error to user
+    @Published var commandTimeRemaining: Double = 0  // For countdown display
+    @Published var isDictationMode = false  // For SousChefView dictation
+    @Published var dictatedText = ""  // Text captured during dictation
+    @Published var dictationText = ""  // Alias for SousChefView compatibility
     
     weak var recipeStore: RecipeStore?
     weak var timerManager: TimerManager?
@@ -21,10 +34,13 @@ class VoiceCommandManager: ObservableObject {
     private let speechSynthesizer = AVSpeechSynthesizer()
     
     private let wakeWord = "foodie"
+    private let alternateWakeWords = ["hey foodie", "kitchen", "hey kitchen", "food"]
     private var commandBuffer = ""
     private var lastCommandTime = Date()
     private var autoStopTimer: Timer?
+    private var countdownTimer: Timer?
     private var wakeWordDetected = false
+    private let commandTimeout: TimeInterval = 8.0  // Extended from 5 to 8 seconds
     
     // Error debouncing to prevent infinite restart loops
     private var errorCount = 0
@@ -96,21 +112,35 @@ class VoiceCommandManager: ObservableObject {
                     
                     // Two-stage detection: wake word, then command
                     if !self.wakeWordDetected {
-                        // Stage 1: Listen for "Foodie"
-                        if transcript.contains(self.wakeWord) {
+                        // Stage 1: Listen for wake words
+                        let detectedWakeWord = self.detectWakeWord(in: transcript)
+                        if detectedWakeWord != nil {
                             print("🎤 Wake word detected! Listening for command...")
                             self.wakeWordDetected = true
                             self.isWaitingForCommand = true
                             self.speakFeedback("Listening")
+                            self.voiceError = nil  // Clear any previous errors
                             
                             // Clear buffer and start fresh for command
                             self.commandBuffer = ""
                             self.lastRecognizedText = ""
                             
-                            // 5 second timeout for command after wake word
+                            // Start countdown timer for command after wake word
                             self.autoStopTimer?.invalidate()
-                            self.autoStopTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { _ in
+                            self.countdownTimer?.invalidate()
+                            self.commandTimeRemaining = self.commandTimeout
+                            
+                            self.countdownTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                                self.commandTimeRemaining -= 0.1
+                                if self.commandTimeRemaining <= 0 {
+                                    self.countdownTimer?.invalidate()
+                                }
+                            }
+                            
+                            self.autoStopTimer = Timer.scheduledTimer(withTimeInterval: self.commandTimeout, repeats: false) { _ in
                                 print("⏱️ Command timeout")
+                                self.countdownTimer?.invalidate()
+                                self.commandTimeRemaining = 0
                                 self.speakFeedback("No command heard")
                                 self.resetListening()
                             }
@@ -169,6 +199,9 @@ class VoiceCommandManager: ObservableObject {
     func stopListening() {
         autoStopTimer?.invalidate()
         autoStopTimer = nil
+        countdownTimer?.invalidate()
+        countdownTimer = nil
+        commandTimeRemaining = 0
         
         if audioEngine.isRunning {
             audioEngine.stop()
@@ -181,8 +214,108 @@ class VoiceCommandManager: ObservableObject {
         isListening = false
         isWaitingForCommand = false
         wakeWordDetected = false
+        isPushToTalkActive = false
+        isDictationMode = false
         lastRecognizedText = ""
         print("🛑 Voice recognition stopped")
+    }
+    
+    // MARK: - Wake Word Detection
+    
+    private func detectWakeWord(in transcript: String) -> String? {
+        let lowercased = transcript.lowercased()
+        
+        // Check primary wake word first
+        if lowercased.contains(wakeWord) {
+            return wakeWord
+        }
+        
+        // Check alternate wake words
+        for alternate in alternateWakeWords {
+            if lowercased.contains(alternate) {
+                return alternate
+            }
+        }
+        
+        return nil
+    }
+    
+    // MARK: - Dictation Mode (for SousChefView)
+    
+    func startDictation() {
+        guard isAuthorized else {
+            print("⚠️ Speech recognition not authorized for dictation")
+            requestAuthorization()
+            return
+        }
+        
+        if recognitionTask != nil {
+            stopListening()
+        }
+        
+        isDictationMode = true
+        dictatedText = ""
+        
+        let audioSession = AVAudioSession.sharedInstance()
+        do {
+            try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker])
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            print("❌ Audio session error (dictation): \(error)")
+            isDictationMode = false
+            return
+        }
+        
+        recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
+        
+        let inputNode = audioEngine.inputNode
+        guard let recognitionRequest = recognitionRequest else {
+            print("❌ Unable to create recognition request (dictation)")
+            isDictationMode = false
+            return
+        }
+        
+        recognitionRequest.shouldReportPartialResults = true
+        
+        recognitionTask = speechRecognizer?.recognitionTask(with: recognitionRequest) { [weak self] result, error in
+            guard let self = self else { return }
+            
+            if let result = result {
+                let transcript = result.bestTranscription.formattedString
+                DispatchQueue.main.async {
+                    self.dictatedText = transcript
+                    self.dictationText = transcript
+                    self.lastRecognizedText = transcript
+                }
+            }
+            
+            if error != nil {
+                print("❌ Dictation recognition error: \(String(describing: error))")
+            }
+        }
+        
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
+            recognitionRequest.append(buffer)
+        }
+        
+        audioEngine.prepare()
+        do {
+            try audioEngine.start()
+            isListening = true
+            print("🎤 Dictation started")
+        } catch {
+            print("❌ Audio engine start error (dictation): \(error)")
+            isDictationMode = false
+        }
+    }
+    
+    func stopDictation() -> String {
+        let finalText = dictationText
+        dictationText = ""
+        dictatedText = ""
+        stopListening()
+        return finalText
     }
     
     private func resetListening() {
@@ -191,8 +324,10 @@ class VoiceCommandManager: ObservableObject {
         isWaitingForCommand = false
         lastRecognizedText = ""
         commandBuffer = ""
+        countdownTimer?.invalidate()
+        commandTimeRemaining = 0
         
-        if voiceEnabled {
+        if voiceEnabled && listeningMode == .wakeWord {
             // Fully restart recognition
             print("🔄 Restarting recognition for next 'Foodie' wake word")
             stopListening()
@@ -201,6 +336,45 @@ class VoiceCommandManager: ObservableObject {
             }
         } else {
             stopListening()
+        }
+    }
+    
+    // MARK: - Push to Talk Mode
+    
+    func startPushToTalk() {
+        guard isAuthorized else {
+            voiceError = "Microphone permission required. Please enable in Settings."
+            return
+        }
+        
+        voiceError = nil
+        isPushToTalkActive = true
+        isWaitingForCommand = true
+        wakeWordDetected = true  // Skip wake word detection
+        
+        startListening()
+        speakFeedback("Listening")
+        print("🎤 Push-to-talk started - speak your command")
+    }
+    
+    func stopPushToTalk() {
+        isPushToTalkActive = false
+        
+        // Process any pending command
+        if !commandBuffer.isEmpty {
+            processCommand(commandBuffer)
+        }
+        
+        stopListening()
+        print("🎤 Push-to-talk stopped")
+    }
+    
+    func retryAfterError() {
+        voiceError = nil
+        errorCount = 0
+        if listeningMode == .wakeWord {
+            voiceEnabled = true
+            startListening()
         }
     }
     
@@ -219,16 +393,14 @@ class VoiceCommandManager: ObservableObject {
         print("⚠️ Error count: \(errorCount)/\(maxErrorsBeforeStop)")
         
         if errorCount >= maxErrorsBeforeStop {
-            // Too many errors in short time - stop listening completely
-            print("🛑 Too many errors - stopping voice recognition. Toggle voice off/on to restart.")
+            print("🛑 Too many errors - stopping voice recognition. Tap to retry.")
             voiceEnabled = false
             stopListening()
-            errorCount = 0
             
-            // Give user feedback
-            speakFeedback("Voice recognition stopped due to errors")
+            DispatchQueue.main.async {
+                self.voiceError = "Voice recognition stopped due to errors. Tap to retry."
+            }
         } else {
-            // Allow restart if under error threshold
             resetListening()
         }
     }
@@ -341,6 +513,17 @@ class VoiceCommandManager: ObservableObject {
             }
             else if normalized.contains("show dessert") || normalized.contains("show side") {
                 self.showAdditionalItem(type: normalized.contains("dessert") ? "dessert" : "side")
+            }
+            
+            // Sent recipes management
+            else if normalized.contains("clear sent") || normalized.contains("clear recipes") {
+                self.recipeStore?.clearSentRecipes()
+                self.speakFeedback("Sent recipes cleared")
+            }
+            else if normalized.contains("go home") || normalized.contains("home") {
+                self.recipeStore?.currentRecipe = nil
+                self.recipeStore?.currentInstructionStep = 0
+                self.speakFeedback("Going home")
             }
             
             else {

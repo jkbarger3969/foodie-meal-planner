@@ -9,7 +9,10 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showAddItem = false
     @State private var showBarcodeScanner = false
+    @State private var showVoiceHelp = false
     @State private var groupBy: GroupBy = .category
+    @State private var selectedItems = Set<String>()
+    @State private var isEditMode: EditMode = .inactive
     
     enum GroupBy: String, CaseIterable {
         case category = "Category"
@@ -47,6 +50,33 @@ struct ContentView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 
+                // Pending changes banner (improved visibility)
+                if store.hasPendingChanges && connection.isConnected {
+                    HStack {
+                        Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
+                            .foregroundColor(.white)
+                        
+                        Text("\(store.pendingSync.count) change\(store.pendingSync.count == 1 ? "" : "s") waiting to sync")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                        
+                        Button(action: connection.syncNow) {
+                            Text("Sync Now")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.white.opacity(0.3))
+                        .controlSize(.small)
+                    }
+                    .padding()
+                    .background(Color.orange.gradient)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                
                 // Sync status banner
                 if case .syncing = connection.syncStatus {
                     SyncStatusBanner(status: connection.syncStatus)
@@ -72,12 +102,12 @@ struct ContentView: View {
                             // Connection status
                             HStack(spacing: 4) {
                                 Circle()
-                                    .fill(connection.isConnected ? Color.green : Color.gray)
+                                    .fill(connection.isConnected ? AppColors.success : AppColors.textMuted)
                                     .frame(width: 8, height: 8)
                                 
                                 Text(connection.isConnected ? "Connected" : "Offline")
                                     .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(AppColors.textMuted)
                             }
                             
                             if let lastSync = store.lastSyncDate {
@@ -128,25 +158,26 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Menu {
-                        Picker("Group By", selection: $groupBy) {
-                            ForEach(GroupBy.allCases, id: \.self) { option in
-                                Text(option.rawValue).tag(option)
+                    HStack(spacing: 12) {
+                        Menu {
+                            Picker("Group By", selection: $groupBy) {
+                                ForEach(GroupBy.allCases, id: \.self) { option in
+                                    Text(option.rawValue).tag(option)
+                                }
                             }
-                        }
-                        
-                        if !store.items.filter(\.isPurchased).isEmpty {
-                            Divider()
                             
-                            Button(role: .destructive, action: store.clearPurchased) {
-                                Label("Clear Purchased", systemImage: "trash")
+                            if !store.items.filter(\.isPurchased).isEmpty {
+                                Divider()
+                                
+                                Button(role: .destructive, action: store.clearPurchased) {
+                                    Label("Clear Purchased", systemImage: "trash")
+                                }
                             }
-                        }
-                        
-                        if !store.items.isEmpty {
-                            Divider()
                             
-                            Button(role: .destructive, action: store.clearAll) {
+                            if !store.items.isEmpty {
+                                Divider()
+                                
+                                Button(role: .destructive, action: store.clearAll) {
                                 Label("Clear All Items", systemImage: "trash.fill")
                             }
                         }
@@ -154,10 +185,22 @@ struct ContentView: View {
                         Image(systemName: "ellipsis.circle")
                             .imageScale(.large)
                     }
+                        
+                        // Edit mode button for multi-select
+                        if !store.items.isEmpty {
+                            EditButton()
+                        }
+                    }
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 16) {
+                        // Voice command help button
+                        Button(action: { showVoiceHelp = true }) {
+                            Image(systemName: "questionmark.circle")
+                                .imageScale(.large)
+                        }
+                        
                         // Sync button
                         Button(action: connection.syncNow) {
                             Image(systemName: "arrow.triangle.2.circlepath")
@@ -200,6 +243,9 @@ struct ContentView: View {
                 BarcodeScannerView()
                     .environmentObject(connection)
             }
+            .sheet(isPresented: $showVoiceHelp) {
+                VoiceCommandHelpView()
+            }
             .fullScreenCover(isPresented: $connection.requiresPairing) {
                 PairingView(connectionManager: connection)
             }
@@ -212,6 +258,49 @@ struct ContentView: View {
                 }
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            // Floating push-to-talk button
+            if voiceCommand.isAuthorized && !store.items.isEmpty {
+                pushToTalkButton
+            }
+        }
+    }
+    
+    // MARK: - Push-to-Talk Button
+    
+    private var pushToTalkButton: some View {
+        Button(action: {}) {
+            ZStack {
+                Circle()
+                    .fill(voiceCommand.isPushToTalkActive ? Color.red : Color.blue)
+                    .frame(width: 60, height: 60)
+                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                
+                Image(systemName: voiceCommand.isPushToTalkActive ? "waveform" : "mic.fill")
+                    .font(.system(size: 24))
+                    .foregroundColor(.white)
+                    .symbolEffect(.variableColor, isActive: voiceCommand.isPushToTalkActive)
+            }
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.1)
+                .onChanged { _ in
+                    voiceCommand.startPushToTalk()
+                }
+        )
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onEnded { _ in
+                    if voiceCommand.isPushToTalkActive {
+                        voiceCommand.stopPushToTalk()
+                    }
+                }
+        )
+        .padding(.trailing, 20)
+        .padding(.bottom, 30)
+        .accessibilityLabel("Push to talk")
+        .accessibilityHint("Press and hold to speak a command")
     }
     
     // MARK: - Store Tab
@@ -450,6 +539,55 @@ struct ContentView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .refreshable {
+            await connection.requestShoppingListAsync()
+        }
+        .environment(\.editMode, $isEditMode)
+        .toolbar {
+            ToolbarItemGroup(placement: .bottomBar) {
+                if isEditMode == .active {
+                    Button(action: checkSelectedItems) {
+                        Label("Check Selected", systemImage: "checkmark.circle")
+                    }
+                    .disabled(selectedItems.isEmpty)
+                    
+                    Spacer()
+                    
+                    Text("\(selectedItems.count) selected")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    Button(role: .destructive, action: deleteSelectedItems) {
+                        Label("Delete Selected", systemImage: "trash")
+                    }
+                    .disabled(selectedItems.isEmpty)
+                }
+            }
+        }
+    }
+    
+    // MARK: - Multi-Select Actions
+    
+    private func checkSelectedItems() {
+        for itemId in selectedItems {
+            if let item = store.items.first(where: { $0.id == itemId }), !item.isPurchased {
+                store.togglePurchased(item)
+            }
+        }
+        selectedItems.removeAll()
+        isEditMode = .inactive
+    }
+    
+    private func deleteSelectedItems() {
+        for itemId in selectedItems {
+            if let item = store.items.first(where: { $0.id == itemId }) {
+                store.deleteItem(item)
+            }
+        }
+        selectedItems.removeAll()
+        isEditMode = .inactive
     }
     
     // MARK: - Helper Methods

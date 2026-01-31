@@ -4,75 +4,106 @@ struct ShoppingItemRow: View {
     let item: ShoppingItem
     let onToggle: () -> Void
     
+    private var categoryColor: Color {
+        switch item.category.lowercased() {
+        case "produce": return AppColors.categoryProduce
+        case "dairy": return AppColors.categoryDairy
+        case "meat": return AppColors.categoryMeat
+        case "seafood": return AppColors.categorySeafood
+        case "bakery": return AppColors.categoryBakery
+        case "pantry": return AppColors.categoryPantry
+        case "frozen": return AppColors.categoryFrozen
+        case "beverage": return AppColors.categoryBeverage
+        case "spice", "spices": return AppColors.categorySpice
+        default: return AppColors.textMuted
+        }
+    }
+    
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
-            // Checkbox
-            Button(action: onToggle) {
-                Image(systemName: item.isPurchased ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 32))
-                    .foregroundColor(item.isPurchased ? .green : .gray)
-                    .contentShape(Rectangle())
+        HStack(alignment: .center, spacing: AppSpacing.lg) {
+            // Checkbox with animation
+            Button(action: {
+                withAnimation(AppAnimation.spring) {
+                    onToggle()
+                }
+            }) {
+                ZStack {
+                    Circle()
+                        .stroke(item.isPurchased ? AppColors.success : AppColors.textMuted, lineWidth: 2)
+                        .frame(width: 28, height: 28)
+                    
+                    if item.isPurchased {
+                        Circle()
+                            .fill(AppColors.success)
+                            .frame(width: 28, height: 28)
+                        
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             
             // Item details
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 Text(item.name)
-                    .font(.body)
-                    .strikethrough(item.isPurchased, color: .gray)
-                    .foregroundColor(item.isPurchased ? .secondary : .primary)
+                    .font(AppTypography.bodyLarge)
+                    .strikethrough(item.isPurchased, color: AppColors.textMuted)
+                    .foregroundColor(item.isPurchased ? AppColors.textMuted : AppColors.textPrimary)
                 
-                HStack(spacing: 8) {
+                HStack(spacing: AppSpacing.sm) {
                     if !item.quantity.isEmpty {
                         Text(item.quantity)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                            .font(AppTypography.caption)
+                            .foregroundColor(AppColors.textMuted)
                     }
                     
-                    // PHASE 4.5.7: Show user assignments
                     if !item.forUsers.isEmpty {
                         if !item.quantity.isEmpty {
                             Text("•")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                                .font(AppTypography.caption)
+                                .foregroundColor(AppColors.textMuted)
                         }
                         
                         Text("For: \(item.forUsers.joined(separator: ", "))")
-                            .font(.caption)
-                            .foregroundColor(.blue)
+                            .font(AppTypography.caption)
+                            .foregroundColor(AppColors.info)
                     }
                     
                     if item.isManuallyAdded {
                         Text("•")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                            .font(AppTypography.caption)
+                            .foregroundColor(AppColors.textMuted)
                         
                         Text("Added while shopping")
-                            .font(.caption)
-                            .foregroundColor(.blue)
+                            .font(AppTypography.caption)
+                            .foregroundColor(AppColors.info)
                     }
                 }
             }
             
             Spacer()
             
-            // Category badge
+            // Category badge with color
             if !item.category.isEmpty {
                 Text(item.category)
-                    .font(.caption2)
-                    .fontWeight(.medium)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.gray.opacity(0.2))
-                    .cornerRadius(8)
+                    .font(AppTypography.captionBold)
+                    .foregroundColor(categoryColor)
+                    .padding(.horizontal, AppSpacing.sm)
+                    .padding(.vertical, AppSpacing.xs)
+                    .background(categoryColor.opacity(0.15))
+                    .cornerRadius(AppRadius.sm)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, AppSpacing.xs)
         .contentShape(Rectangle())
         .onTapGesture {
-            onToggle()
+            withAnimation(AppAnimation.spring) {
+                onToggle()
+            }
         }
-        // Accessibility
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(item.name), \(item.quantity)")
         .accessibilityAddTraits(item.isPurchased ? .isSelected : [])

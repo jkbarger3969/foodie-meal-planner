@@ -2,6 +2,7 @@ import Foundation
 import Speech
 import AVFoundation
 import Combine
+import UIKit
 
 class VoiceCommandManager: ObservableObject {
     @Published var isListening = false
@@ -9,6 +10,14 @@ class VoiceCommandManager: ObservableObject {
     @Published var lastCommand = ""
     @Published var lastRecognizedText = ""
     @Published var isAuthorized = false
+    @Published var isPushToTalkActive = false
+    @Published var listeningMode: ListeningMode = .wakeWord
+    
+    enum ListeningMode: String, CaseIterable {
+        case wakeWord = "Wake Word"
+        case pushToTalk = "Push to Talk"
+        case disabled = "Disabled"
+    }
     
     weak var shoppingListStore: ShoppingListStore?
     
@@ -21,6 +30,7 @@ class VoiceCommandManager: ObservableObject {
     private let wakeWord = "foodie"
     private var commandBuffer = ""
     private var lastCommandTime = Date()
+    private var pushToTalkTranscript = ""
     
     init() {
         requestAuthorization()
@@ -122,7 +132,99 @@ class VoiceCommandManager: ObservableObject {
         recognitionRequest = nil
         recognitionTask = nil
         isListening = false
+        isPushToTalkActive = false
         print("🛑 Voice recognition stopped")
+    }
+    
+    // MARK: - Push-to-Talk Mode
+    
+    func startPushToTalk() {
+        guard isAuthorized else {
+            print("⚠️ Speech recognition not authorized for push-to-talk")
+            requestAuthorization()
+            return
+        }
+        
+        if recognitionTask != nil {
+            stopListening()
+        }
+        
+        isPushToTalkActive = true
+        pushToTalkTranscript = ""
+        
+        let audioSession = AVAudioSession.sharedInstance()
+        do {
+            try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker])
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            print("❌ Audio session error (PTT): \(error)")
+            isPushToTalkActive = false
+            return
+        }
+        
+        recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
+        
+        let inputNode = audioEngine.inputNode
+        guard let recognitionRequest = recognitionRequest else {
+            print("❌ Unable to create recognition request (PTT)")
+            isPushToTalkActive = false
+            return
+        }
+        
+        recognitionRequest.shouldReportPartialResults = true
+        
+        recognitionTask = speechRecognizer?.recognitionTask(with: recognitionRequest) { [weak self] result, error in
+            guard let self = self else { return }
+            
+            if let result = result {
+                let transcript = result.bestTranscription.formattedString
+                DispatchQueue.main.async {
+                    self.pushToTalkTranscript = transcript
+                    self.lastRecognizedText = transcript
+                }
+            }
+            
+            if error != nil {
+                print("❌ PTT Recognition error: \(String(describing: error))")
+            }
+        }
+        
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
+            recognitionRequest.append(buffer)
+        }
+        
+        audioEngine.prepare()
+        do {
+            try audioEngine.start()
+            isListening = true
+            print("🎤 Push-to-talk started - speak your command directly")
+            
+            let generator = UIImpactFeedbackGenerator(style: .medium)
+            generator.impactOccurred()
+        } catch {
+            print("❌ Audio engine start error (PTT): \(error)")
+            isPushToTalkActive = false
+        }
+    }
+    
+    func stopPushToTalk() {
+        guard isPushToTalkActive else { return }
+        
+        let finalTranscript = pushToTalkTranscript.trimmingCharacters(in: .whitespaces)
+        
+        stopListening()
+        
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+        
+        if !finalTranscript.isEmpty {
+            print("🎤 PTT command captured: '\(finalTranscript)'")
+            processCommand(finalTranscript)
+        } else {
+            print("🎤 PTT: No command captured")
+            speakFeedback("I didn't catch that")
+        }
     }
     
     private func handleWakeWord(transcript: String) {

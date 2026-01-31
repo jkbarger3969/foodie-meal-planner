@@ -422,6 +422,11 @@ class ConnectionManager: NSObject, ObservableObject, URLSessionWebSocketDelegate
         sendMessage(message)
     }
     
+    func requestShoppingListAsync() async {
+        requestShoppingList()
+        try? await Task.sleep(nanoseconds: 500_000_000)
+    }
+    
     func requestStoreList() {
         let message = Message(type: "request_store_list")
         sendMessage(message)
@@ -628,6 +633,44 @@ class ConnectionManager: NSObject, ObservableObject, URLSessionWebSocketDelegate
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
         if status == .authorizedWhenInUse || status == .authorizedAlways {
             locationManager.startUpdatingLocation()
+        }
+    }
+    
+    // MARK: - Pantry Integration
+    
+    func requestPantryItems() {
+        guard isConnected else { return }
+        
+        let message: [String: Any] = ["type": "getPantryItems"]
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: message),
+              let jsonString = String(data: jsonData, encoding: .utf8) else { return }
+        
+        webSocketTask?.send(.string(jsonString)) { error in
+            if let error = error {
+                Logger.error("Failed to request pantry items: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    func addToShoppingList(name: String, quantity: String, category: String) {
+        guard isConnected else { return }
+        
+        let message: [String: Any] = [
+            "type": "addShoppingItem",
+            "name": name,
+            "quantity": quantity,
+            "category": category
+        ]
+        
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: message),
+              let jsonString = String(data: jsonData, encoding: .utf8) else { return }
+        
+        webSocketTask?.send(.string(jsonString)) { error in
+            if let error = error {
+                Logger.error("Failed to add to shopping list: \(error.localizedDescription)")
+            } else {
+                Logger.success("Added \(name) to shopping list")
+            }
         }
     }
 }

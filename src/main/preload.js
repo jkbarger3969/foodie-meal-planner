@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('Foodie', {
   sendShoppingListToPhones: (items) => ipcRenderer.invoke('companion:send-shopping-list', { items }),
   sendTodaysMealsToTablets: () => ipcRenderer.invoke('companion:send-todays-meals'),
   sendRecipeToTablet: (recipeId) => ipcRenderer.invoke('companion:send-recipe', { recipeId }),
+  sendCollectionToTablet: (collectionId) => ipcRenderer.invoke('companion:send-collection', { collectionId }),
   getCompanionDevices: () => ipcRenderer.invoke('companion:get-devices'),
   getServerIP: () => ipcRenderer.invoke('companion:get-server-ip'),
 

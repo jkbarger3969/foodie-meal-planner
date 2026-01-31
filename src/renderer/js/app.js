@@ -510,6 +510,11 @@ async function pantryModal_(opts) {
         // Reload pantry list to show updated values
         await loadPantry();
 
+        // Update dashboard stats (low stock and expiring counts)
+        if (typeof updateDashboardPantryStats === 'function') {
+          updateDashboardPantryStats();
+        }
+
         close_({ ok: true });
       } catch (e) {
         console.error('[pantryModal] Unexpected error:', e);
@@ -529,6 +534,7 @@ async function pantryModal_(opts) {
 
 function escapeHtml(s) { return String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]); }
 function escapeAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
+function truncate(s, len = 20) { const str = String(s || ''); return str.length > len ? str.slice(0, len) + '...' : str; }
 
 // Convert image path to displayable URL
 // Handles: local paths (images/xxx.jpg), full URLs (https://...), and empty/default
@@ -602,9 +608,260 @@ let STORES = [];
 let STORE_ID_TO_NAME = {};
 let RECIPES = [];
 let CURRENT_QUERY = '';
+let CURRENT_SORT = 'title-asc'; // Default sort: A-Z by title
 let LOADING = false;
 let ACTIVE_USER = null; // Will be set by initUserSwitcher
 let toastCounter = 0; // For showToast
+
+// ========== PHASE 4: Search Enhancements ==========
+const RECENT_SEARCHES_KEY = 'foodie_recent_searches';
+const MAX_RECENT_SEARCHES = 5;
+let AUTOCOMPLETE_INDEX = -1; // For keyboard navigation
+
+function getRecentSearches() {
+  try {
+    const stored = localStorage.getItem(RECENT_SEARCHES_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveRecentSearch(query) {
+  if (!query || query.length < 2) return;
+  
+  let searches = getRecentSearches();
+  // Remove if already exists (to move to front)
+  searches = searches.filter(s => s.toLowerCase() !== query.toLowerCase());
+  // Add to front
+  searches.unshift(query);
+  // Limit size
+  searches = searches.slice(0, MAX_RECENT_SEARCHES);
+  
+  try {
+    localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(searches));
+  } catch (e) { }
+  
+  renderRecentSearches();
+}
+
+function removeRecentSearch(query) {
+  let searches = getRecentSearches();
+  searches = searches.filter(s => s !== query);
+  try {
+    localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(searches));
+  } catch (e) { }
+  renderRecentSearches();
+}
+
+function renderRecentSearches() {
+  const container = document.getElementById('recentSearches');
+  if (!container) return;
+  
+  const searches = getRecentSearches();
+  if (searches.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+  
+  container.innerHTML = `
+    <span class="recent-searches-label">Recent:</span>
+    ${searches.map(s => `
+      <span class="recent-search-chip" data-query="${escapeAttr(s)}">
+        <span class="chip-text">${escapeHtml(s)}</span>
+        <span class="chip-remove" data-remove="${escapeAttr(s)}">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="10" height="10"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </span>
+      </span>
+    `).join('')}
+  `;
+  
+  // Add click handlers
+  container.querySelectorAll('.recent-search-chip').forEach(chip => {
+    chip.addEventListener('click', (e) => {
+      if (e.target.closest('.chip-remove')) {
+        e.stopPropagation();
+        const query = e.target.closest('.chip-remove').dataset.remove;
+        removeRecentSearch(query);
+      } else {
+        const query = chip.dataset.query;
+        const searchInput = document.getElementById('recipeSearch');
+        if (searchInput) {
+          searchInput.value = query;
+          searchInput.classList.add('has-value');
+          CURRENT_QUERY = query;
+          renderRecipes();
+          hideAutocomplete();
+        }
+      }
+    });
+  });
+}
+
+function showAutocomplete(query) {
+  const container = document.getElementById('searchAutocomplete');
+  if (!container || !query || query.length < 2) {
+    hideAutocomplete();
+    return;
+  }
+  
+  // Get matching recipes (max 8)
+  const queryLower = query.toLowerCase();
+  const matches = RECIPES.filter(r => 
+    (r.Title || '').toLowerCase().includes(queryLower)
+  ).slice(0, 8);
+  
+  if (matches.length === 0) {
+    hideAutocomplete();
+    return;
+  }
+  
+  AUTOCOMPLETE_INDEX = -1;
+  
+  container.innerHTML = matches.map((r, i) => {
+    // Highlight matching text
+    const title = r.Title || '';
+    const titleHtml = highlightMatch(title, query);
+    const meta = [r.MealType, r.Cuisine].filter(Boolean).join(' • ');
+    
+    return `
+      <div class="search-autocomplete-item" data-index="${i}" data-recipe-id="${r.RecipeId}">
+        <div class="item-title">${titleHtml}</div>
+        ${meta ? `<div class="item-meta">${escapeHtml(meta)}</div>` : ''}
+      </div>
+    `;
+  }).join('');
+  
+  container.classList.add('visible');
+  
+  // Add click handlers
+  container.querySelectorAll('.search-autocomplete-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const recipeId = item.dataset.recipeId;
+      const recipe = RECIPES.find(r => r.RecipeId === recipeId);
+      if (recipe) {
+        const searchInput = document.getElementById('recipeSearch');
+        if (searchInput) {
+          searchInput.value = recipe.Title;
+          searchInput.classList.add('has-value');
+          CURRENT_QUERY = recipe.Title;
+          saveRecentSearch(recipe.Title);
+          renderRecipes();
+        }
+      }
+      hideAutocomplete();
+    });
+  });
+}
+
+function hideAutocomplete() {
+  const container = document.getElementById('searchAutocomplete');
+  if (container) {
+    container.classList.remove('visible');
+    container.innerHTML = '';
+  }
+  AUTOCOMPLETE_INDEX = -1;
+}
+
+function highlightMatch(text, query) {
+  if (!query) return escapeHtml(text);
+  const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  return escapeHtml(text).replace(regex, '<mark>$1</mark>');
+}
+
+function navigateAutocomplete(direction) {
+  const container = document.getElementById('searchAutocomplete');
+  if (!container || !container.classList.contains('visible')) return;
+  
+  const items = container.querySelectorAll('.search-autocomplete-item');
+  if (items.length === 0) return;
+  
+  // Remove previous selection
+  items.forEach(item => item.classList.remove('selected'));
+  
+  // Update index
+  if (direction === 'down') {
+    AUTOCOMPLETE_INDEX = (AUTOCOMPLETE_INDEX + 1) % items.length;
+  } else if (direction === 'up') {
+    AUTOCOMPLETE_INDEX = AUTOCOMPLETE_INDEX <= 0 ? items.length - 1 : AUTOCOMPLETE_INDEX - 1;
+  }
+  
+  // Add selection
+  items[AUTOCOMPLETE_INDEX].classList.add('selected');
+  items[AUTOCOMPLETE_INDEX].scrollIntoView({ block: 'nearest' });
+}
+
+function selectAutocompleteItem() {
+  const container = document.getElementById('searchAutocomplete');
+  if (!container || AUTOCOMPLETE_INDEX < 0) return false;
+  
+  const items = container.querySelectorAll('.search-autocomplete-item');
+  if (items[AUTOCOMPLETE_INDEX]) {
+    items[AUTOCOMPLETE_INDEX].click();
+    return true;
+  }
+  return false;
+}
+
+function initSearchEnhancements() {
+  const searchInput = document.getElementById('recipeSearch');
+  const clearBtn = document.getElementById('searchClearBtn');
+  
+  if (!searchInput) return;
+  
+  // Show/hide clear button based on input value
+  searchInput.addEventListener('input', () => {
+    if (searchInput.value) {
+      searchInput.classList.add('has-value');
+      showAutocomplete(searchInput.value);
+    } else {
+      searchInput.classList.remove('has-value');
+      hideAutocomplete();
+    }
+  });
+  
+  // Clear button
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      searchInput.classList.remove('has-value');
+      CURRENT_QUERY = '';
+      hideAutocomplete();
+      renderRecipes();
+      searchInput.focus();
+    });
+  }
+  
+  // Keyboard navigation for autocomplete
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      navigateAutocomplete('down');
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      navigateAutocomplete('up');
+    } else if (e.key === 'Enter') {
+      if (selectAutocompleteItem()) {
+        e.preventDefault();
+      } else if (searchInput.value.length >= 2) {
+        saveRecentSearch(searchInput.value);
+        hideAutocomplete();
+      }
+    } else if (e.key === 'Escape') {
+      hideAutocomplete();
+    }
+  });
+  
+  // Hide autocomplete when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.search-input-wrapper')) {
+      hideAutocomplete();
+    }
+  });
+  
+  // Render initial recent searches
+  renderRecentSearches();
+}
 
 // Early stub for showToast - actual implementation is later
 function showToast(message, type = 'info', duration = 5000) {
@@ -675,7 +932,7 @@ let COLLECTION_RECIPES = [];
 let DRAG_SOURCE = null;
 
 // Phase 3: Meal pattern templates (stored in localStorage)
-const MEAL_PATTERN_KEY = 'foodieMealPattern';
+
 
 // Phase 1.3: Undo/Redo system
 const UNDO = {
@@ -1306,6 +1563,64 @@ async function toggleRecipeFavorite(rid) {
     }, 300);
   }
 }
+
+// Sort recipes based on CURRENT_SORT
+function sortRecipes_(recipes) {
+  const sorted = [...recipes];
+  
+  switch (CURRENT_SORT) {
+    case 'title-asc':
+      sorted.sort((a, b) => (a.Title || '').localeCompare(b.Title || ''));
+      break;
+    case 'title-desc':
+      sorted.sort((a, b) => (b.Title || '').localeCompare(a.Title || ''));
+      break;
+    case 'newest':
+      sorted.sort((a, b) => {
+        const dateA = new Date(a.Created || a.DateAdded || 0);
+        const dateB = new Date(b.Created || b.DateAdded || 0);
+        return dateB - dateA;
+      });
+      break;
+    case 'oldest':
+      sorted.sort((a, b) => {
+        const dateA = new Date(a.Created || a.DateAdded || 0);
+        const dateB = new Date(b.Created || b.DateAdded || 0);
+        return dateA - dateB;
+      });
+      break;
+    case 'meal-type':
+      const mealOrder = ['Breakfast', 'Brunch', 'Lunch', 'Dinner', 'Side Dish', 'Appetizer', 'Dessert', 'Sauce', 'Beverage', ''];
+      sorted.sort((a, b) => {
+        const orderA = mealOrder.indexOf(a.MealType || '');
+        const orderB = mealOrder.indexOf(b.MealType || '');
+        if (orderA !== orderB) return orderA - orderB;
+        return (a.Title || '').localeCompare(b.Title || '');
+      });
+      break;
+    case 'cuisine':
+      sorted.sort((a, b) => {
+        const cuisineA = a.Cuisine || 'ZZZ';
+        const cuisineB = b.Cuisine || 'ZZZ';
+        if (cuisineA !== cuisineB) return cuisineA.localeCompare(cuisineB);
+        return (a.Title || '').localeCompare(b.Title || '');
+      });
+      break;
+    case 'favorites':
+      sorted.sort((a, b) => {
+        const favA = a.is_favorite === true || a.is_favorite === 1 || a.is_favorite === '1' ? 0 : 1;
+        const favB = b.is_favorite === true || b.is_favorite === 1 || b.is_favorite === '1' ? 0 : 1;
+        if (favA !== favB) return favA - favB;
+        return (a.Title || '').localeCompare(b.Title || '');
+      });
+      break;
+    default:
+      sorted.sort((a, b) => (a.Title || '').localeCompare(b.Title || ''));
+  }
+  
+  return sorted;
+}
+
 function renderRecipes() {
   // PHASE 9.2: Performance tracking
   const startTime = performance.now();
@@ -1386,9 +1701,18 @@ function renderRecipes() {
     }
   }
 
+  // ========== PHASE 3: Apply Sorting ==========
+  recipesToShow = sortRecipes_(recipesToShow);
+
   // ========== PHASE 9.2: Store filtered recipes for virtual scrolling ==========
   VIRTUAL_SCROLL.filteredRecipes = recipesToShow;
   VIRTUAL_SCROLL.totalItems = recipesToShow.length;
+
+  // ========== Update Recipe Count Badge ==========
+  const countBadge = document.getElementById('recipeCountBadge');
+  if (countBadge) {
+    countBadge.textContent = `${recipesToShow.length} recipe${recipesToShow.length !== 1 ? 's' : ''}`;
+  }
 
   // ========== PHASE 4.1: Enhanced Empty States ==========
   if (!recipesToShow.length) {
@@ -1586,7 +1910,8 @@ function renderRecipeCard_(r) {
     <div class="recipe-card animate-in" 
          draggable="true"
          data-recipe-id="${escapeAttr(r.RecipeId)}" 
-         data-recipe-title="${escapeAttr(r.Title || '')}">
+         data-recipe-title="${escapeAttr(r.Title || '')}"
+         data-meal-type="${escapeAttr(r.MealType || '')}">
       
       <!-- Pinterest Badge (Cuisine) -->
       ${r.Cuisine ? `<div class="recipe-card-badge">${escapeHtml(r.Cuisine)}</div>` : ''}
@@ -2868,27 +3193,74 @@ document.addEventListener('change', (e) => {
 
 // ---------- meal picker ----------
 
-function openMealPicker(date, slot, mode = 'normal') {
+async function openMealPicker(date, slot, mode = 'normal') {
   MP = { open: true, date, slot, q: '', recipes: [], selectedUserIds: new Set(), mode };
-  document.getElementById('mpTitle').textContent = mode === 'auto-fill' ? 'Select a Breakfast Recipe' : `Select a recipe for ${slot}`;
-  document.getElementById('mpSub').textContent = mode === 'auto-fill' ? 'This recipe will be used to auto-fill empty breakfast slots' : `Date: ${date}`;
-  document.getElementById('mpSearch').value = '';
-  document.getElementById('mpStatus').textContent = '';
-  document.getElementById('mpList').innerHTML = '';
-  openModal('mealPickerBack');
-
+  
   // Hide assignment editor if in auto-fill mode
   const editorBox = document.getElementById('mpAssignmentEditor');
   if (editorBox) {
     editorBox.style.display = mode === 'auto-fill' ? 'none' : '';
   }
 
-  // PHASE 4.5.5: Load meal assignment editor
-  if (mode !== 'auto-fill') {
-    renderMealAssignmentEditor(date, slot);
+  // Load ALL data BEFORE opening modal to prevent visual expansion
+  const userId = ACTIVE_USER?.userId || null;
+  
+  // Parallel fetch: recipes + users + assignments
+  const [recipesRes, usersRes, assignmentsRes] = await Promise.all([
+    api('listRecipesAll', { q: '', userId }),
+    mode !== 'auto-fill' ? api('listUsers', {}) : Promise.resolve({ ok: false }),
+    mode !== 'auto-fill' ? api('getMealAssignments', { date, slot }) : Promise.resolve({ ok: false })
+  ]);
+
+  // Store recipes
+  MP.recipes = recipesRes.ok ? (recipesRes.recipes || []) : [];
+
+  // Prepare assignment editor HTML
+  let assignmentHtml = '';
+  if (mode !== 'auto-fill' && usersRes.ok && usersRes.users) {
+    const assignedUserIds = new Set(
+      (assignmentsRes.ok && assignmentsRes.assignments)
+        ? assignmentsRes.assignments.map(a => a.userId)
+        : []
+    );
+    MP.selectedUserIds = assignedUserIds;
+    
+    assignmentHtml = usersRes.users.map(user => `
+      <div class="meal-assignment-chip ${assignedUserIds.has(user.userId) ? 'selected' : ''}" 
+           data-user-id="${escapeAttr(user.userId)}"
+           onclick="toggleMealAssignment('${escapeAttr(user.userId)}', '${escapeAttr(date)}', '${escapeAttr(slot)}')">
+        <span class="meal-assignment-chip-avatar">${escapeHtml(user.avatarEmoji || '👤')}</span>
+        <span class="meal-assignment-chip-name">${escapeHtml(user.name)}</span>
+        <span class="meal-assignment-chip-check">✓</span>
+      </div>
+    `).join('');
   }
 
-  mealPickerLoad(true);
+  // Prepare recipe list HTML
+  const recipeListHtml = MP.recipes.map(r => `
+    <div class="item" style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+      <div>
+        <div><strong>${escapeHtml(r.Title || '')}</strong></div>
+        <div class="muted">${escapeHtml(r.Cuisine || '')}</div>
+      </div>
+      <div class="actions">
+        <button class="primary" data-action="mp-select" data-rid="${escapeAttr(r.RecipeId)}" data-title="${escapeAttr(r.Title || '')}">Select</button>
+        <button class="ghost" data-action="mp-view" data-rid="${escapeAttr(r.RecipeId)}">View</button>
+      </div>
+    </div>
+  `).join('');
+
+  // NOW populate everything and open modal (all at once, no expansion)
+  document.getElementById('mpTitle').textContent = mode === 'auto-fill' ? 'Select a Breakfast Recipe' : `Select a recipe for ${slot}`;
+  document.getElementById('mpSub').textContent = mode === 'auto-fill' ? 'This recipe will be used to auto-fill empty breakfast slots' : `Date: ${date}`;
+  document.getElementById('mpSearch').value = '';
+  document.getElementById('mpStatus').textContent = MP.recipes.length ? `${MP.recipes.length} recipes` : 'No recipes found';
+  document.getElementById('mpList').innerHTML = recipeListHtml;
+  if (editorBox && assignmentHtml) {
+    editorBox.innerHTML = assignmentHtml;
+  }
+
+  openModal('mealPickerBack');
 }
 
 function closeMealPicker() {
@@ -4761,6 +5133,14 @@ function populateShopStoreFilter_() {
   const currentValue = SHOP.storeFilter || 'all';
   const storeIds = new Set();
 
+  // Include ALL stores from the global STORES array (not just stores in the shopping list)
+  if (STORES && STORES.length) {
+    for (const s of STORES) {
+      if (s.StoreId) storeIds.add(String(s.StoreId));
+    }
+  }
+  
+  // Also include stores from the current shopping list (in case any aren't in STORES)
   if (SHOP.groups && SHOP.groups.length) {
     for (const g of SHOP.groups) {
       if (g.StoreId) storeIds.add(g.StoreId);
@@ -4947,10 +5327,10 @@ function renderShop_(groups) {
                          data-source-ids="${escapeAttr(sourceIdsJson)}">
                       <div class="shop-item-check">
                         <input type="checkbox" 
+                               class="shopping-item-checkbox"
                                data-action="shop-item-toggle" 
                                data-itemkey="${escapeAttr(itemKey)}"
-                               ${isBought ? 'checked' : ''}
-                               style="width:18px; height:18px; cursor:pointer;">
+                               ${isBought ? 'checked' : ''}>
                       </div>
                       <div class="shop-item-details">
                         <div class="shop-item-name">
@@ -5976,9 +6356,23 @@ async function loadPantry() {
       return qty !== null && threshold !== null && threshold > 0 && Number.isFinite(qty) && Number.isFinite(threshold) && qty <= threshold;
     };
 
+    // Helper: check if item is expiring soon (within 7 days) or already expired
+    const isExpiringSoon = (it) => {
+      if (!it.expiration_date) return false;
+      const expDate = new Date(it.expiration_date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Reset to start of day
+      const sevenDaysFromNow = new Date(today);
+      sevenDaysFromNow.setDate(today.getDate() + 7);
+      // Include items that are already expired OR expiring within 7 days
+      return expDate <= sevenDaysFromNow;
+    };
+
     // Apply filter
     if (filter === 'low') {
       items = items.filter(isLowStock);
+    } else if (filter === 'expiring') {
+      items = items.filter(isExpiringSoon);
     }
 
     box.innerHTML = items.length ? items.map(it => {
@@ -6016,6 +6410,19 @@ async function loadPantry() {
           <div class="empty-state-title">No low stock items!</div>
           <div class="empty-state-message">
             All your pantry items are well stocked.
+          </div>
+          <div class="empty-state-actions">
+            <button class="ghost" onclick="document.getElementById('pantryFilter').value = 'all'; loadPantry();">
+              View All Items
+            </button>
+          </div>
+        </div>
+      ` : filter === 'expiring' ? `
+        <div class="empty-state">
+          <div class="empty-state-icon">✅</div>
+          <div class="empty-state-title">No items expiring soon!</div>
+          <div class="empty-state-message">
+            None of your pantry items are expiring in the next 7 days.
           </div>
           <div class="empty-state-actions">
             <button class="ghost" onclick="document.getElementById('pantryFilter').value = 'all'; loadPantry();">
@@ -6115,9 +6522,6 @@ async function updatePantryInsights() {
     // Update low stock details
     updateLowStockDetails(lowStockItems);
 
-    // Update expiring items details
-    updateExpiringDetails(expiringItems);
-
   } catch (error) {
     console.error('Error updating pantry insights:', error);
     showToast('Error updating insights', 'error');
@@ -6185,45 +6589,6 @@ function updateLowStockDetails(lowStockItems) {
               <button class="restock-btn" data-action="quick-restock" data-item-id="${escapeAttr(item.ItemId)}">
                 Restock
               </button>
-              <button class="ghost mini" data-action="pantry-edit" data-id="${escapeAttr(item.ItemId)}">
-                Edit
-              </button>
-            </div>
-          </div>
-        `;
-  }).join('');
-}
-
-// Update expiring items details
-function updateExpiringDetails(expiringItems) {
-  const container = document.getElementById('expiringItemsDetailList');
-  const details = document.getElementById('expiringDetails');
-
-  if (expiringItems.length === 0) {
-    details.style.display = 'none';
-    return;
-  }
-
-  details.style.display = 'block';
-
-  const today = new Date();
-  container.innerHTML = expiringItems.map(item => {
-    const expDate = new Date(item.expiration_date);
-    const daysUntil = Math.ceil((expDate - today) / (24 * 60 * 60 * 1000));
-    const urgency = daysUntil <= 2 ? 'URGENT' : daysUntil <= 5 ? 'SOON' : '';
-
-    return `
-          <div class="expiring-item">
-            <div>
-              <div class="expiring-item-name">
-                ${urgency ? `<span style="background:#ef4444;color:white;padding:2px 6px;border-radius:3px;font-size:10px;margin-right:6px;">${urgency}</span>` : ''}
-                ${escapeHtml(item.Name)}
-              </div>
-              <div class="expiring-item-date">
-                Expires: ${item.expiration_date} (${daysUntil} day${daysUntil !== 1 ? 's' : ''})
-              </div>
-            </div>
-            <div>
               <button class="ghost mini" data-action="pantry-edit" data-id="${escapeAttr(item.ItemId)}">
                 Edit
               </button>
@@ -7443,6 +7808,7 @@ function renderCollections() {
                 </div>
               </div>
               <button class="primary" data-action="collection-shopping-list" data-cid="${escapeAttr(c.CollectionId)}" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">🛒 Shopping List</button>
+              <button class="ghost" data-action="send-collection-to-ipad" data-cid="${escapeAttr(c.CollectionId)}" data-cname="${escapeAttr(c.Name)}" title="Send to iPad" data-tooltip="Send collection to iPad companion app" data-tooltip-pos="bottom">📱</button>
             </div>
           </div>
         </div>
@@ -7535,13 +7901,21 @@ function renderCollectionRecipes() {
   console.log('renderCollectionRecipes called');
   const container = document.getElementById('collectionRecipesList');
   console.log('Container element:', container);
-  const collection = COLLECTIONS.find(c => c.CollectionId === CURRENT_COLLECTION_ID);
+  console.log('CURRENT_COLLECTION_ID:', CURRENT_COLLECTION_ID, 'type:', typeof CURRENT_COLLECTION_ID);
+  console.log('COLLECTIONS:', COLLECTIONS);
+  const collection = COLLECTIONS.find(c => String(c.CollectionId) === String(CURRENT_COLLECTION_ID));
   console.log('Current collection:', collection);
   console.log('COLLECTION_RECIPES length:', COLLECTION_RECIPES.length);
 
-  const subtitleEl = document.getElementById('collectionRecipesSubtitle');
-  if (subtitleEl) {
-    subtitleEl.textContent = collection ? `Recipes in "${collection.Name}"` : 'All Recipes';
+  const titleEl = document.getElementById('collectionRecipesTitle');
+  if (titleEl) {
+    if (collection) {
+      titleEl.textContent = `Recipes in ${collection.Name} Collection`;
+    } else if (CURRENT_COLLECTION_ID) {
+      titleEl.textContent = 'Recipes in Selected Collection';
+    } else {
+      titleEl.textContent = 'Recipes Across All Collections';
+    }
   }
 
   if (!COLLECTION_RECIPES.length) {
@@ -7577,8 +7951,8 @@ function renderCollectionRecipes() {
                 <div class="muted">${escapeHtml(r.MealType || 'Any')} • ${escapeHtml(r.Cuisine || '')}</div>
               </div>
             </div>
-            <div class="actions">
               <button class="ghost" data-action="recipe-view" data-rid="${escapeAttr(r.RecipeId)}">View</button>
+              <button class="danger" data-action="toggle-recipe-in-collection" data-rid="${escapeAttr(r.RecipeId)}" data-incollection="true">Remove</button>
               <button class="primary" data-action="assign-to-planner" data-rid="${escapeAttr(r.RecipeId)}" data-title="${escapeAttr(r.Title)}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">Assign to Planner</button>
             </div>
           </div>
@@ -7737,11 +8111,12 @@ function renderAssignRecipesList(query) {
                 <strong>${escapeHtml(r.Title)}</strong>
                 <div class="muted">${escapeHtml(r.MealType || 'Any')} • ${escapeHtml(r.Cuisine || '')}</div>
               </div>
-              <button class="${inCollection ? 'danger' : 'ghost'}" 
-                      data-action="toggle-recipe-in-collection"
+              <button class="${inCollection ? 'ghost disabled' : 'primary'}" 
+                      ${inCollection ? 'disabled' : ''}
+                      data-action="${inCollection ? '' : 'toggle-recipe-in-collection'}"
                       data-rid="${escapeAttr(r.RecipeId)}"
                       data-incollection="${inCollection}">
-                ${inCollection ? 'Remove' : 'Add'}
+                ${inCollection ? 'Added' : 'Add'}
               </button>
             </div>
           </div>
@@ -9090,6 +9465,15 @@ function bindUi() {
     await resetAndLoadRecipes();
   });
 
+  // Sort dropdown
+  const sortSelect = document.getElementById('recipeSortBy');
+  if (sortSelect) {
+    sortSelect.addEventListener('change', () => {
+      CURRENT_SORT = sortSelect.value;
+      renderRecipes();
+    });
+  }
+
   // ========== PHASE 2.3: Advanced Filter Event Handlers ==========
 
   // Toggle advanced filters panel
@@ -9686,9 +10070,8 @@ function bindUi() {
   document.getElementById('btnViewAllPantry').addEventListener('click', filterPantryAll);
   document.getElementById('btnViewLowStock').addEventListener('click', filterPantryLowStock);
   document.getElementById('btnViewExpiring').addEventListener('click', () => {
-    document.getElementById('pantryFilter').value = 'all';
+    document.getElementById('pantryFilter').value = 'expiring';
     loadPantry();
-    document.getElementById('pantryList').scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 
   // Delegated event listener for quick restock buttons
@@ -9806,6 +10189,10 @@ function bindUi() {
       if (res.ok) {
         showToast('Item deleted from pantry.', 'success');
         await loadPantry();
+        // Update dashboard stats
+        if (typeof updateDashboardPantryStats === 'function') {
+          updateDashboardPantryStats();
+        }
       } else {
         showToast(`Failed to delete: ${res.error}`, 'error');
       }
@@ -10296,73 +10683,7 @@ function bindUi() {
     }
   });
 
-  document.getElementById('btnSaveMealPattern').addEventListener('click', () => {
-    if (!PLAN.start) { showToast('Load a plan range first', 'warning'); return; }
 
-    const pattern = [];
-    for (let i = 0; i < 7; i++) {
-      const dateKey = addDays(PLAN.start, i);
-      const plan = PLAN.plansByDate[dateKey] || {};
-      pattern.push({
-        Breakfast: plan.Breakfast || null,
-        Lunch: plan.Lunch || null,
-        Dinner: plan.Dinner || null
-      });
-    }
-
-    try {
-      localStorage.setItem(MEAL_PATTERN_KEY, JSON.stringify(pattern));
-      document.getElementById('templateStatus').textContent = 'Template saved!';
-      setTimeout(() => { document.getElementById('templateStatus').textContent = ''; }, 3000);
-    } catch (e) {
-      showToast('Failed to save template: ' + e.message, 'error');
-    }
-  });
-
-  document.getElementById('btnLoadMealPattern').addEventListener('click', async () => {
-    let pattern;
-    try {
-      pattern = JSON.parse(localStorage.getItem(MEAL_PATTERN_KEY));
-      if (!pattern || !Array.isArray(pattern)) throw new Error('No template found');
-    } catch (e) {
-      showToast('No saved template found', 'info');
-      return;
-    }
-
-    if (!PLAN.start) { showToast('Load a plan range first', 'warning'); return; }
-
-    const statusEl = document.getElementById('templateStatus');
-    statusEl.textContent = 'Loading template...';
-
-    try {
-      for (let i = 0; i < pattern.length && i < 7; i++) {
-        const dateKey = addDays(PLAN.start, i);
-        const day = pattern[i];
-
-        for (const slot of ['Breakfast', 'Lunch', 'Dinner']) {
-          if (day[slot]) {
-            const activeUserRes = await api('getActiveUser');
-            const userId = (activeUserRes.ok && activeUserRes.userId) ? activeUserRes.userId : null;
-            await api('upsertUserPlanMeal', {
-              userId,
-              date: dateKey,
-              slot,
-              meal: {
-                RecipeId: day[slot].RecipeId || '',
-                Title: day[slot].Title || ''
-              }
-            });
-          }
-        }
-      }
-
-      await loadPlansIntoUi(PLAN.start, PLAN.days);
-      statusEl.textContent = 'Template loaded!';
-      setTimeout(() => { statusEl.textContent = ''; }, 3000);
-    } catch (e) {
-      statusEl.textContent = `Error: ${e.message}`;
-    }
-  });
 
   // ========== PHASE 3: LEFTOVERS PICKER ==========
 
@@ -10899,6 +11220,28 @@ function bindUi() {
       await showAssignCollectionToDayModal(collectionId, collectionName);
       return;
     }
+
+    const sendToIpad = e.target.closest('[data-action="send-collection-to-ipad"]');
+    if (sendToIpad) {
+      const collectionId = sendToIpad.dataset.cid;
+      const collectionName = sendToIpad.dataset.cname;
+      try {
+        showToast('Sending collection to iPad...', 'info');
+        const result = await window.api.sendCollectionToTablet(collectionId);
+        if (result && result.ok) {
+          let msg = `Collection "${collectionName}" sent to iPad (${result.sentCount} recipes)`;
+          if (result.truncated) {
+            msg += ' - truncated to 50 recipes';
+          }
+          showToast(msg, 'success');
+        } else {
+          showToast('Failed to send collection: ' + (result?.error || 'No connected iPads'), 'error');
+        }
+      } catch (err) {
+        showToast('Failed to send collection: ' + err.message, 'error');
+      }
+      return;
+    }
   });
 
   // ========== PHASE 2.4: Collection View Toggle ==========
@@ -10914,7 +11257,7 @@ function bindUi() {
   });
 
   // Theme toggle
-  document.getElementById('btnThemeToggle').addEventListener('click', () => {
+  document.getElementById('btnThemeToggle')?.addEventListener('click', () => {
     const currentTheme = document.documentElement.getAttribute('data-theme');
     const newTheme = currentTheme === 'light' ? 'dark' : 'light';
     document.documentElement.setAttribute('data-theme', newTheme === 'dark' ? '' : 'light');
@@ -10922,6 +11265,45 @@ function bindUi() {
       localStorage.setItem('foodieTheme', newTheme);
     } catch (_) { }
   });
+
+  // Handler for actions within the Collection Recipes List (main view)
+  const mainCollList = document.getElementById('collectionRecipesList');
+  if (mainCollList) {
+    mainCollList.addEventListener('click', async (e) => {
+      // Handle the "Remove" button (which uses toggle-recipe-in-collection action)
+      const toggle = e.target.closest('[data-action="toggle-recipe-in-collection"]');
+      if (toggle) {
+        const recipeId = toggle.dataset.rid;
+        // In the main list, it's always "Remove" because we are viewing the collection contents
+        if (confirm('Remove this recipe from the collection?')) {
+          const res = await api('removeRecipeFromCollection', {
+            collectionId: CURRENT_COLLECTION_ID,
+            recipeId
+          });
+
+          if (res.ok) {
+            showToast('Recipe removed', 'success');
+            // Reload to reflect changes
+            await loadCollectionRecipes(CURRENT_COLLECTION_ID);
+            // Update the collection count in the sidebar list too
+            const coll = COLLECTIONS.find(c => c.CollectionId == CURRENT_COLLECTION_ID);
+            if (coll) {
+              coll.RecipeCount = Math.max(0, (coll.RecipeCount || 0) - 1);
+              renderCollections();
+            }
+          } else {
+            showToast(res.error || 'Failed to remove', 'error');
+          }
+        }
+        return;
+      }
+
+      // Also handle role toggle if needed here, but it's likely handled by change event elsewhere?
+      // Actually role toggle is a <select> 'change' event. We need to verify if that's handled. 
+      // Checking existing code, 'change' listener is usually separate. 
+    });
+  }
+
 
   // Google Calendar setup
   document.getElementById('btnUploadGoogleCreds').addEventListener('click', uploadGoogleCredentials);
@@ -12981,6 +13363,19 @@ async function init() {
     // Initialize user switcher (loads users)
     try {
       await initUserSwitcher();
+      // Refresh dashboard week/upcoming sections now that user is loaded
+      await renderDashboardWeekOverview();
+      await renderDashboardUpcomingMeals();
+    } catch (_) { }
+
+    // Initialize day detail modal (for clicking days in dashboard week overview)
+    try {
+      initDayDetailModal();
+    } catch (_) { }
+
+    // Initialize search enhancements (autocomplete, recent searches, clear button)
+    try {
+      initSearchEnhancements();
     } catch (_) { }
 
     // Initialize help search (only needed on Admin tab)
@@ -15864,26 +16259,38 @@ async function renderDashboard() {
     console.warn('[Dashboard] Failed to update shop count:', e);
   }
 
-  // 4. Stats - Pantry Low Stock
+  // 4. Stats - Pantry Low Stock and Expiring Soon
   try {
     const res = await api('listPantry', { q: '' });
     if (res.ok && res.items) {
+      // Low stock count
       const lowStockCount = res.items.filter(item => {
         const qty = item.QtyNum;
         const threshold = item.low_stock_threshold;
-        // Only count as low stock if threshold is set (> 0) and qty is at or below it
         return qty !== null && threshold !== null && Number(threshold) > 0 && Number(qty) <= Number(threshold);
       }).length;
       document.getElementById('dashLowStockCount').textContent = lowStockCount;
-      document.getElementById('dashLowStockLabel').textContent = lowStockCount === 1 ? 'Item' : 'Items';
+
+      // Expiring soon count (within 7 days or already expired)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const sevenDaysFromNow = new Date(today);
+      sevenDaysFromNow.setDate(today.getDate() + 7);
+      
+      const expiringCount = res.items.filter(item => {
+        if (!item.expiration_date) return false;
+        const expDate = new Date(item.expiration_date);
+        return expDate <= sevenDaysFromNow;
+      }).length;
+      document.getElementById('dashExpiringCount').textContent = expiringCount;
     } else {
       document.getElementById('dashLowStockCount').textContent = '0';
-      document.getElementById('dashLowStockLabel').textContent = 'Items';
+      document.getElementById('dashExpiringCount').textContent = '0';
     }
   } catch (e) {
     console.warn('[Dashboard] Failed to load pantry stats:', e);
     document.getElementById('dashLowStockCount').textContent = '-';
-    document.getElementById('dashLowStockLabel').textContent = '';
+    document.getElementById('dashExpiringCount').textContent = '-';
   }
 
   // 5. Total Recipes - fetch if not loaded yet
@@ -15905,6 +16312,488 @@ async function renderDashboard() {
       document.getElementById('dashRecipeCount').textContent = '-';
     }
   }
+
+  // 6. Render Week Overview and Upcoming Meals
+  await renderDashboardWeekOverview();
+  await renderDashboardUpcomingMeals();
+  renderDashboardRecentActivity();
+}
+
+// Update just the pantry stats on the dashboard (for dynamic updates)
+async function updateDashboardPantryStats() {
+  try {
+    const res = await api('listPantry', { q: '' });
+    if (res.ok && res.items) {
+      // Low stock count
+      const lowStockCount = res.items.filter(item => {
+        const qty = item.QtyNum;
+        const threshold = item.low_stock_threshold;
+        return qty !== null && threshold !== null && Number(threshold) > 0 && Number(qty) <= Number(threshold);
+      }).length;
+      const lowStockEl = document.getElementById('dashLowStockCount');
+      if (lowStockEl) lowStockEl.textContent = lowStockCount;
+
+      // Expiring soon count (within 7 days or already expired)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const sevenDaysFromNow = new Date(today);
+      sevenDaysFromNow.setDate(today.getDate() + 7);
+      
+      const expiringCount = res.items.filter(item => {
+        if (!item.expiration_date) return false;
+        const expDate = new Date(item.expiration_date);
+        return expDate <= sevenDaysFromNow;
+      }).length;
+      const expiringEl = document.getElementById('dashExpiringCount');
+      if (expiringEl) expiringEl.textContent = expiringCount;
+    }
+  } catch (e) {
+    console.warn('[Dashboard] Failed to update pantry stats:', e);
+  }
+}
+
+// Make it globally available
+window.updateDashboardPantryStats = updateDashboardPantryStats;
+
+// ==================== DASHBOARD: WEEK OVERVIEW ====================
+async function renderDashboardWeekOverview() {
+  const container = document.getElementById('dashboardWeekGrid');
+  if (!container) return;
+
+  const today = new Date();
+  const todayStr = ymd(today);
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  // Start from TODAY and show 7 days forward
+  const startDate = todayStr;
+  const endDate = addDays(todayStr, 6);
+
+  let weekPlans = [];
+  let mealsPlannedCount = 0;
+
+  try {
+    // Use getUserPlanMeals - same API that the planner uses
+    const res = await api('getUserPlanMeals', {
+      start: startDate,
+      end: endDate
+    });
+    console.log('[Dashboard] Week plans response:', res);
+    if (res.ok && res.plans) {
+      weekPlans = res.plans;
+    }
+  } catch (e) {
+    console.warn('[Dashboard] Failed to load week plans:', e);
+  }
+
+  // Build week grid HTML
+  let html = '';
+  for (let i = 0; i < 7; i++) {
+    const dateStr = addDays(todayStr, i);
+    const date = new Date(dateStr + 'T12:00:00');
+    const isToday = dateStr === todayStr;
+    const dayName = dayNames[date.getDay()];
+    const dayNum = date.getDate();
+
+    // Find plan for this day
+    const dayPlan = weekPlans.find(p => p.Date === dateStr) || {};
+    
+    // Get meal arrays
+    const breakfastMeals = Array.isArray(dayPlan.Breakfast) ? dayPlan.Breakfast : [];
+    const lunchMeals = Array.isArray(dayPlan.Lunch) ? dayPlan.Lunch : [];
+    const dinnerMeals = Array.isArray(dayPlan.Dinner) ? dayPlan.Dinner : [];
+    
+    const hasBreakfast = breakfastMeals.length > 0;
+    const hasLunch = lunchMeals.length > 0;
+    const hasDinner = dinnerMeals.length > 0;
+
+    // Build tooltips with meal names
+    const breakfastTitle = hasBreakfast ? breakfastMeals.map(m => m.Title || 'Recipe').join(', ') : 'No breakfast';
+    const lunchTitle = hasLunch ? lunchMeals.map(m => m.Title || 'Recipe').join(', ') : 'No lunch';
+    const dinnerTitle = hasDinner ? dinnerMeals.map(m => m.Title || 'Recipe').join(', ') : 'No dinner';
+
+    if (hasBreakfast) mealsPlannedCount += breakfastMeals.length;
+    if (hasLunch) mealsPlannedCount += lunchMeals.length;
+    if (hasDinner) mealsPlannedCount += dinnerMeals.length;
+
+    // Get first meal title for each slot (truncated)
+    const breakfastLabel = hasBreakfast ? truncate(breakfastMeals[0].Title || 'Meal', 12) : '';
+    const lunchLabel = hasLunch ? truncate(lunchMeals[0].Title || 'Meal', 12) : '';
+    const dinnerLabel = hasDinner ? truncate(dinnerMeals[0].Title || 'Meal', 12) : '';
+
+    // Label: Today, Tomorrow, or day name
+    let dayLabel = dayName;
+    if (i === 0) dayLabel = 'Today';
+    else if (i === 1) dayLabel = 'Tmrw';
+
+    html += `
+      <div class="week-day-cell ${isToday ? 'today' : ''}" onclick="showDayDetailModal('${dateStr}')">
+        <div class="week-day-name">${dayLabel}</div>
+        <div class="week-day-date">${dayNum}</div>
+        <div class="week-day-meals">
+          ${hasBreakfast ? `<div class="week-meal-pill breakfast" title="${escapeHtml(breakfastTitle)}">${escapeHtml(breakfastLabel)}</div>` : ''}
+          ${hasLunch ? `<div class="week-meal-pill lunch" title="${escapeHtml(lunchTitle)}">${escapeHtml(lunchLabel)}</div>` : ''}
+          ${hasDinner ? `<div class="week-meal-pill dinner" title="${escapeHtml(dinnerTitle)}">${escapeHtml(dinnerLabel)}</div>` : ''}
+          ${!hasBreakfast && !hasLunch && !hasDinner ? '<div class="week-day-empty">No meals</div>' : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
+
+  // Update meals planned stat
+  const mealsPlannedEl = document.getElementById('dashMealsPlanned');
+  if (mealsPlannedEl) {
+    mealsPlannedEl.textContent = mealsPlannedCount;
+  }
+  
+  console.log('[Dashboard] Total meals planned (next 7 days):', mealsPlannedCount);
+}
+
+// ==================== DASHBOARD: DAY DETAIL MODAL ====================
+let DAY_DETAIL_DATE = null;
+
+async function showDayDetailModal(dateStr) {
+  DAY_DETAIL_DATE = dateStr;
+  const modal = document.getElementById('dayDetailModalBack');
+  const titleEl = document.getElementById('dayDetailTitle');
+  const subEl = document.getElementById('dayDetailSub');
+  const contentEl = document.getElementById('dayDetailContent');
+
+  if (!modal || !contentEl) return;
+
+  // Format the date for display
+  const date = new Date(dateStr + 'T12:00:00');
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  
+  const todayStr = ymd(new Date());
+  const isToday = dateStr === todayStr;
+  const isTomorrow = dateStr === addDays(todayStr, 1);
+  
+  let displayDate = `${dayNames[date.getDay()]}, ${monthNames[date.getMonth()]} ${date.getDate()}`;
+  if (isToday) displayDate = `Today - ${displayDate}`;
+  else if (isTomorrow) displayDate = `Tomorrow - ${displayDate}`;
+
+  titleEl.textContent = displayDate;
+  subEl.textContent = 'Manage meals for this day';
+
+  // Show modal with loading state
+  contentEl.innerHTML = '<div style="text-align:center; padding:40px; color:var(--muted);">Loading...</div>';
+  modal.style.display = 'flex';
+
+  // Fetch day's plan and store in PLAN.plansByDate
+  try {
+    const res = await api('getUserPlanMeals', { start: dateStr, end: dateStr });
+    if (res.ok && res.plans && res.plans[0]) {
+      const dayPlan = res.plans[0];
+      // Store in PLAN.plansByDate so renderPlanner can access it
+      PLAN.plansByDate[dateStr] = dayPlan;
+    } else {
+      // Empty day - initialize with empty arrays
+      PLAN.plansByDate[dateStr] = { Date: dateStr, Breakfast: [], Lunch: [], Dinner: [] };
+    }
+
+    // Use renderPlanner to render a single day with all features (side dishes, send to iPad, etc.)
+    // includeSwap = false since we don't need meal swap buttons in the modal
+    renderPlanner('dayDetailContent', dateStr, 1, false);
+    
+    // Add custom styling class to the modal content
+    contentEl.classList.add('day-detail-planner-view');
+    
+    // Attach event listeners for the rendered planner card
+    attachDayDetailEventListeners();
+  } catch (e) {
+    contentEl.innerHTML = '<div style="text-align:center; padding:40px; color:var(--muted);">Failed to load meals</div>';
+  }
+}
+
+// Attach event listeners for buttons in the day detail modal
+function attachDayDetailEventListeners() {
+  const container = document.getElementById('dayDetailContent');
+  if (!container) return;
+
+  // Select meal buttons
+  container.querySelectorAll('[data-action="select-meal"]').forEach(el => {
+    el.addEventListener('click', () => {
+      const date = el.dataset.date;
+      const slot = el.dataset.slot;
+      closeDayDetailModal();
+      openMealPicker(date, slot);
+    });
+  });
+
+  // View recipe buttons
+  container.querySelectorAll('[data-action="planner-view"]').forEach(el => {
+    el.addEventListener('click', () => {
+      const rid = el.dataset.rid;
+      if (rid) openRecipeModalView(rid);
+    });
+  });
+
+  // Send to iPad buttons
+  container.querySelectorAll('[data-action="send-to-ipad"]').forEach(el => {
+    el.addEventListener('click', async () => {
+      const rid = el.dataset.rid;
+      if (rid && typeof sendRecipeToiPad === 'function') {
+        await sendRecipeToiPad(rid);
+      } else if (rid && typeof window.sendRecipeToiPad === 'function') {
+        await window.sendRecipeToiPad(rid);
+      }
+    });
+  });
+
+  // Mark as cooked buttons
+  container.querySelectorAll('[data-action="mark-cooked"]').forEach(el => {
+    el.addEventListener('click', async () => {
+      const rid = el.dataset.rid;
+      if (rid && typeof markRecipeAsCooked === 'function') {
+        await markRecipeAsCooked(rid);
+        showToast('Marked as cooked');
+      }
+    });
+  });
+
+  // Clear day button
+  container.querySelectorAll('[data-action="clear-day"]').forEach(el => {
+    el.addEventListener('click', async () => {
+      const date = el.dataset.date;
+      if (date) {
+        await clearDay(date);
+        await showDayDetailModal(date);
+        await renderDashboardWeekOverview();
+        await renderDashboardUpcomingMeals();
+      }
+    });
+  });
+
+  // Delete user meal buttons
+  container.querySelectorAll('[data-action="delete-user-meal"]').forEach(el => {
+    el.addEventListener('click', async () => {
+      const mealId = el.dataset.mealId;
+      const date = el.dataset.date;
+      const slot = el.dataset.slot;
+      if (mealId && typeof deleteUserMeal === 'function') {
+        await deleteUserMeal(mealId, date, slot);
+        await showDayDetailModal(date);
+        await renderDashboardWeekOverview();
+        await renderDashboardUpcomingMeals();
+      }
+    });
+  });
+
+  // Add additional item buttons
+  container.querySelectorAll('.btn-add-additional').forEach(el => {
+    el.addEventListener('click', () => {
+      const date = el.dataset.date;
+      const slot = el.dataset.slot;
+      if (date && slot && typeof showAddAdditionalItemModal === 'function') {
+        showAddAdditionalItemModal(date, slot);
+      }
+    });
+  });
+
+  // Remove additional item buttons
+  container.querySelectorAll('.btn-remove-additional').forEach(el => {
+    el.addEventListener('click', async () => {
+      const id = el.dataset.id;
+      const date = el.dataset.date;
+      const slot = el.dataset.slot;
+      if (id && typeof removeAdditionalItem === 'function') {
+        await removeAdditionalItem(id);
+        await showDayDetailModal(date);
+      }
+    });
+  });
+}
+
+function closeDayDetailModal() {
+  const modal = document.getElementById('dayDetailModalBack');
+  if (modal) modal.style.display = 'none';
+  DAY_DETAIL_DATE = null;
+}
+
+// Initialize day detail modal event listeners
+function initDayDetailModal() {
+  const modal = document.getElementById('dayDetailModalBack');
+  const closeBtn = document.getElementById('btnDayDetailClose');
+  const goToPlannerBtn = document.getElementById('btnDayDetailGoToPlanner');
+
+  if (closeBtn) {
+    closeBtn.addEventListener('click', closeDayDetailModal);
+  }
+
+  if (goToPlannerBtn) {
+    goToPlannerBtn.addEventListener('click', () => {
+      closeDayDetailModal();
+      document.querySelector('[data-tab=planner]').click();
+    });
+  }
+
+  // Close on backdrop click
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeDayDetailModal();
+    });
+  }
+
+  // Close on Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal && modal.style.display === 'flex') {
+      closeDayDetailModal();
+    }
+  });
+}
+
+// Make functions globally available
+window.showDayDetailModal = showDayDetailModal;
+window.closeDayDetailModal = closeDayDetailModal;
+
+// ==================== DASHBOARD: UPCOMING MEALS ====================
+async function renderDashboardUpcomingMeals() {
+  const container = document.getElementById('dashboardUpcomingMeals');
+  if (!container) return;
+
+  const today = new Date();
+  const todayStr = ymd(today);
+  const currentHour = today.getHours();
+
+  // Determine current meal slot
+  let currentSlot = 'dinner';
+  if (currentHour < 11) currentSlot = 'breakfast';
+  else if (currentHour < 16) currentSlot = 'lunch';
+
+  // Fetch next 4 days of plans (today + 3 more)
+  const startDate = todayStr;
+  const endDate = addDays(todayStr, 3);
+
+  let upcomingMeals = [];
+
+  try {
+    // Use getUserPlanMeals - same API that the planner uses
+    const res = await api('getUserPlanMeals', { 
+      start: startDate, 
+      end: endDate 
+    });
+
+    if (res.ok && res.plans) {
+      const slotOrder = ['Breakfast', 'Lunch', 'Dinner'];
+
+      for (const plan of res.plans) {
+        for (const slot of slotOrder) {
+          const meals = plan[slot];
+          if (!Array.isArray(meals) || meals.length === 0) continue;
+
+          // Skip past meals for today
+          if (plan.Date === todayStr) {
+            const slotLower = slot.toLowerCase();
+            if (currentSlot === 'lunch' && slotLower === 'breakfast') continue;
+            if (currentSlot === 'dinner' && (slotLower === 'breakfast' || slotLower === 'lunch')) continue;
+          }
+
+          for (const meal of meals) {
+            upcomingMeals.push({
+              date: plan.Date,
+              slot: slot,
+              title: meal.Title || 'Unknown Recipe',
+              recipeId: meal.RecipeId
+            });
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Dashboard] Failed to load upcoming meals:', e);
+  }
+
+  // Limit to 4 upcoming meals
+  upcomingMeals = upcomingMeals.slice(0, 4);
+
+  if (upcomingMeals.length === 0) {
+    container.innerHTML = '<div class="upcoming-empty">No upcoming meals planned</div>';
+    return;
+  }
+
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  let html = '';
+  for (const meal of upcomingMeals) {
+    const mealDate = new Date(meal.date + 'T12:00:00');
+    const isToday = meal.date === todayStr;
+    const dayLabel = isToday ? 'Today' : dayNames[mealDate.getDay()];
+    const slotLower = meal.slot.toLowerCase();
+
+    html += `
+      <div class="upcoming-meal-item" onclick="openRecipeModalView('${meal.recipeId}')">
+        <div class="upcoming-meal-time">
+          <div class="upcoming-meal-day">${dayLabel}</div>
+          <div class="upcoming-meal-slot ${slotLower}">${meal.slot}</div>
+        </div>
+        <div class="upcoming-meal-info">
+          <div class="upcoming-meal-title">${escapeHtml(meal.title)}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
+}
+
+// ==================== DASHBOARD: RECENT ACTIVITY ====================
+function renderDashboardRecentActivity() {
+  const container = document.getElementById('dashboardRecentActivity');
+  if (!container) return;
+
+  // Get recent actions from the existing RECENT_ACTIONS array if available
+  const recentActions = window.RECENT_ACTIONS || [];
+  const displayActions = recentActions.slice(0, 5);
+
+  if (displayActions.length === 0) {
+    container.innerHTML = '<div class="activity-empty">No recent activity</div>';
+    return;
+  }
+
+  const iconMap = {
+    'add': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M5 12h14"/><path d="M12 5v14"/></svg>',
+    'edit': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>',
+    'delete': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>',
+    'plan': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>'
+  };
+
+  let html = '';
+  for (const action of displayActions) {
+    const iconType = action.type || 'edit';
+    const icon = iconMap[iconType] || iconMap['edit'];
+    const timeAgo = formatTimeAgo(action.timestamp);
+
+    html += `
+      <div class="activity-item">
+        <div class="activity-icon ${iconType}">${icon}</div>
+        <div class="activity-content">
+          <div class="activity-text">${escapeHtml(action.description || action.label || 'Action')}</div>
+          <div class="activity-time">${timeAgo}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
+}
+
+// Helper function for time ago formatting
+function formatTimeAgo(timestamp) {
+  if (!timestamp) return '';
+  const now = Date.now();
+  const diff = now - timestamp;
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 7) return `${days}d ago`;
+  return new Date(timestamp).toLocaleDateString();
 }
 
 // ==================== PHASE 4: SMART PANTRY SUGGESTIONS ====================

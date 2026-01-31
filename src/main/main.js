@@ -1593,14 +1593,15 @@ class CompanionServer {
 
       const recipeData = {
         ...serializedRecipe,
-        ingredients: serializedIngredients
+        ingredients: serializedIngredients,
+        sentAt: new Date().toISOString(),
+        source: 'manual'
       };
 
-      // 3. Send to iPads
-      // Use 'load_recipe' type for Instant Open behavior
+      // 3. Send to iPads - use 'sent_recipe' type so iPad adds to queue instead of immediately opening
       return this.pushToDeviceType('ipad', {
-        type: 'recipe', // iOS ConnectionManager expects 'recipe' or 'load_recipe'
-        data: recipeData, // Wrap in data for consistency with other messages
+        type: 'sent_recipe',
+        data: recipeData,
         timestamp: new Date().toISOString()
       });
 
@@ -1697,6 +1698,81 @@ class CompanionServer {
     } catch (error) {
       console.error('Error pushing recipe:', error);
       return false;
+    }
+  }
+
+  async pushCollectionToTablets(collectionId) {
+    try {
+      console.log(`📱 Pushing collection ${collectionId} to tablets...`);
+      
+      const collectionResult = await handleApiCall({
+        fn: 'getCollection',
+        payload: { collectionId },
+        store
+      });
+
+      if (!collectionResult || !collectionResult.ok) {
+        console.error('Failed to get collection:', collectionId);
+        return { ok: false, error: 'Collection not found' };
+      }
+
+      const recipesResult = await handleApiCall({
+        fn: 'listCollectionRecipes',
+        payload: { collectionId },
+        store
+      });
+
+      if (!recipesResult || !recipesResult.ok) {
+        console.error('Failed to get collection recipes');
+        return { ok: false, error: 'Failed to load recipes' };
+      }
+
+      const recipes = recipesResult.recipes || [];
+      const maxRecipes = 50;
+      
+      if (recipes.length > maxRecipes) {
+        console.warn(`Collection has ${recipes.length} recipes, truncating to ${maxRecipes}`);
+      }
+
+      const limitedRecipes = recipes.slice(0, maxRecipes);
+
+      const serializedRecipes = await Promise.all(
+        limitedRecipes.map(async (recipe) => {
+          const ingredientsResult = await handleApiCall({
+            fn: 'listRecipeIngredients',
+            payload: { recipeId: recipe.RecipeId },
+            store
+          });
+
+          const serializedRecipe = this.serializeRecipe(recipe);
+          const serializedIngredients = (ingredientsResult?.items || []).map(ing => this.serializeIngredient(ing));
+
+          return {
+            ...serializedRecipe,
+            ingredients: serializedIngredients
+          };
+        })
+      );
+
+      const collectionData = {
+        id: collectionId,
+        name: collectionResult.collection?.Name || 'Collection',
+        recipes: serializedRecipes,
+        sentAt: new Date().toISOString()
+      };
+
+      const result = this.pushToDeviceType('ipad', {
+        type: 'collection',
+        data: collectionData,
+        timestamp: new Date().toISOString()
+      });
+
+      console.log(`📱 Sent collection "${collectionData.name}" with ${serializedRecipes.length} recipes`);
+      return { ok: true, sentCount: serializedRecipes.length, truncated: recipes.length > maxRecipes };
+
+    } catch (error) {
+      console.error('Error pushing collection:', error);
+      return { ok: false, error: error.message };
     }
   }
 
@@ -2583,6 +2659,16 @@ async function bootstrap() {
     try {
       const success = await companionServer.pushRecipeToTablet(recipeId);
       return { ok: true, success };
+    } catch (e) {
+      return { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+  });
+
+  ipcMain.handle('companion:send-collection', async (_evt, { collectionId }) => {
+    if (!companionServer) return { ok: false, error: 'Companion server not initialized' };
+    try {
+      const result = await companionServer.pushCollectionToTablets(collectionId);
+      return result;
     } catch (e) {
       return { ok: false, error: e && e.message ? e.message : String(e) };
     }

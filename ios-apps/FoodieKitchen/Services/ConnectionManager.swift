@@ -21,6 +21,29 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
     @Published var sousChefResponse: String? = nil
     @Published var sousChefStatus: String = "idle" // idle, thinking, error
     
+    // Connection quality
+    @Published var connectionQuality: ConnectionQuality = .unknown
+    @Published var isSearching = false
+    @Published var lastPingLatency: TimeInterval = 0
+    
+    enum ConnectionQuality {
+        case excellent  // < 50ms
+        case good       // < 150ms
+        case fair       // < 300ms
+        case poor       // >= 300ms
+        case unknown
+        
+        var description: String {
+            switch self {
+            case .excellent: return "Excellent"
+            case .good: return "Good"
+            case .fair: return "Fair"
+            case .poor: return "Poor"
+            case .unknown: return "Unknown"
+            }
+        }
+    }
+    
     // Persistent device ID for pairing
     private var deviceId: String {
         if let id = UserDefaults.standard.string(forKey: "foodie_device_id") {
@@ -366,6 +389,16 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
                     self.handleMessage(msgData)
                 }
                 
+            case "sent_recipe":
+                if let msgData = Message.from(data) {
+                    self.handleMessage(msgData)
+                }
+                
+            case "collection":
+                if let msgData = Message.from(data) {
+                    self.handleMessage(msgData)
+                }
+                
             case "todays_meals":
                 if let msgData = Message.from(data) {
                     self.handleMessage(msgData)
@@ -420,10 +453,27 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
                 Logger.success("Connected to companion server")
                 
             case "recipe":
-                // Now handled by handleRecipeMessage fast-path
                 if let data = message.data,
                    let recipe = Recipe(from: data) {
                     self.recipeStore?.setCurrentRecipe(recipe)
+                }
+                
+            case "sent_recipe":
+                if let data = message.data,
+                   let recipe = Recipe(from: data) {
+                    self.recipeStore?.addSentRecipe(recipe)
+                    let generator = UIImpactFeedbackGenerator(style: .medium)
+                    generator.impactOccurred()
+                    print("📱 Received sent recipe: \(recipe.title)")
+                }
+                
+            case "collection":
+                if let data = message.data,
+                   let collection = RecipeCollection(from: data) {
+                    self.recipeStore?.addCollection(collection)
+                    let generator = UIImpactFeedbackGenerator(style: .medium)
+                    generator.impactOccurred()
+                    print("📱 Received collection: \(collection.name) with \(collection.recipes.count) recipes")
                 }
                 
             case "todays_meals":
@@ -517,6 +567,8 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
         }
     }
     
+    private var pingTimestamp: Date?
+    
     private func startPingTimer() {
         pingTimer?.invalidate()
         pingTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
@@ -527,17 +579,39 @@ class ConnectionManager: NSObject, ObservableObject, NetServiceBrowserDelegate, 
     private func sendPing() {
         guard isConnected else { return }
         
+        pingTimestamp = Date()
         let message: [String: Any] = ["type": "ping"]
         guard let jsonData = try? JSONSerialization.data(withJSONObject: message),
               let jsonString = String(data: jsonData, encoding: .utf8) else { return }
         
         webSocket?.send(.string(jsonString)) { [weak self] error in
             if let error = error {
-                print("❌ Ping error: \(error.localizedDescription)")
+                print("Ping error: \(error.localizedDescription)")
                 DispatchQueue.main.async {
                     self?.isConnected = false
+                    self?.connectionQuality = .unknown
                     self?.handleDisconnection()
                 }
+            }
+        }
+    }
+    
+    func handlePongReceived() {
+        guard let timestamp = pingTimestamp else { return }
+        let latency = Date().timeIntervalSince(timestamp) * 1000 // Convert to ms
+        
+        DispatchQueue.main.async { [weak self] in
+            self?.lastPingLatency = latency
+            
+            // Update connection quality based on latency
+            if latency < 50 {
+                self?.connectionQuality = .excellent
+            } else if latency < 150 {
+                self?.connectionQuality = .good
+            } else if latency < 300 {
+                self?.connectionQuality = .fair
+            } else {
+                self?.connectionQuality = .poor
             }
         }
     }

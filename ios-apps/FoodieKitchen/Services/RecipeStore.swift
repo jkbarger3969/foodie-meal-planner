@@ -11,6 +11,8 @@ class RecipeStore: ObservableObject {
     @Published var currentRecipe: Recipe?
     @Published var availableRecipes: [Recipe] = []
     @Published var availableMealSlots: [MealSlot] = []  // NEW: Meal slots with additional items
+    @Published var sentRecipes: [Recipe] = []  // Recipes sent individually from desktop
+    @Published var collections: [RecipeCollection] = []  // Collections sent from desktop
     @Published var currentInstructionStep = 0
     @Published var checkedIngredients: Set<String> = []
     @Published var shouldShowMealList = false  // NEW: Trigger to show meal list
@@ -20,6 +22,11 @@ class RecipeStore: ObservableObject {
     private let storageKey = "FoodieKitchen_CurrentRecipe"
     private let availableRecipesKey = "FoodieKitchen_AvailableRecipes"
     private let availableMealSlotsKey = "FoodieKitchen_AvailableMealSlots"
+    private let sentRecipesKey = "FoodieKitchen_SentRecipes"
+    private let collectionsKey = "FoodieKitchen_Collections"
+    
+    private let maxSentRecipes = 10
+    private let maxCollections = 5
     
     init() {
         loadFromLocalStorage()
@@ -41,6 +48,55 @@ class RecipeStore: ObservableObject {
     func setAvailableMealSlots(_ slots: [MealSlot]) {
         availableMealSlots = slots
         saveMealSlots()
+    }
+    
+    // MARK: - Sent Recipes Management
+    
+    func addSentRecipe(_ recipe: Recipe) {
+        sentRecipes.insert(recipe, at: 0)
+        if sentRecipes.count > maxSentRecipes {
+            sentRecipes.removeLast()
+        }
+        saveSentRecipes()
+        print("📱 Added sent recipe: \(recipe.title), total: \(sentRecipes.count)")
+    }
+    
+    func clearSentRecipes() {
+        sentRecipes.removeAll()
+        saveSentRecipes()
+        print("📱 Cleared all sent recipes")
+    }
+    
+    func removeSentRecipe(_ recipeId: String) {
+        sentRecipes.removeAll { $0.id == recipeId }
+        saveSentRecipes()
+        print("📱 Removed sent recipe: \(recipeId)")
+    }
+    
+    // MARK: - Collections Management
+    
+    func addCollection(_ collection: RecipeCollection) {
+        if let existingIndex = collections.firstIndex(where: { $0.id == collection.id }) {
+            collections.remove(at: existingIndex)
+        }
+        collections.insert(collection, at: 0)
+        if collections.count > maxCollections {
+            collections.removeLast()
+        }
+        saveCollections()
+        print("📱 Added collection: \(collection.name) with \(collection.recipes.count) recipes")
+    }
+    
+    func clearCollections() {
+        collections.removeAll()
+        saveCollections()
+        print("📱 Cleared all collections")
+    }
+    
+    func removeCollection(_ collectionId: String) {
+        collections.removeAll { $0.id == collectionId }
+        saveCollections()
+        print("📱 Removed collection: \(collectionId)")
     }
     
     // NEW: Load a recipe by ID from desktop
@@ -126,6 +182,18 @@ class RecipeStore: ObservableObject {
         }
     }
     
+    func saveSentRecipes() {
+        if let encoded = try? JSONEncoder().encode(sentRecipes) {
+            UserDefaults.standard.set(encoded, forKey: sentRecipesKey)
+        }
+    }
+    
+    private func saveCollections() {
+        if let encoded = try? JSONEncoder().encode(collections) {
+            UserDefaults.standard.set(encoded, forKey: collectionsKey)
+        }
+    }
+    
     private func loadFromLocalStorage() {
         if let data = UserDefaults.standard.data(forKey: storageKey),
            let recipe = try? JSONDecoder().decode(Recipe.self, from: data) {
@@ -146,6 +214,16 @@ class RecipeStore: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: availableMealSlotsKey),
            let slots = try? JSONDecoder().decode([MealSlot].self, from: data) {
             availableMealSlots = slots
+        }
+        
+        if let data = UserDefaults.standard.data(forKey: sentRecipesKey),
+           let recipes = try? JSONDecoder().decode([Recipe].self, from: data) {
+            sentRecipes = recipes
+        }
+        
+        if let data = UserDefaults.standard.data(forKey: collectionsKey),
+           let cols = try? JSONDecoder().decode([RecipeCollection].self, from: data) {
+            collections = cols
         }
     }
 }

@@ -361,13 +361,16 @@ function canonicalUnit(u) {
     liter: 'l', litre: 'l', liters: 'l', litres: 'l', l: 'l',
     pinch: 'pinch', pinches: 'pinch',
     clove: 'clove', cloves: 'clove',
-    can: 'can', cans: 'can',
+    can: 'can', cans: 'can', tin: 'can', tins: 'can',
     jar: 'jar', jars: 'jar',
-    package: 'package', packages: 'package', pkg: 'package', pkgs: 'package',
+    package: 'package', packages: 'package', pkg: 'package', pkgs: 'package', pack: 'package', packs: 'package',
     bunch: 'bunch', bunches: 'bunch',
+    head: 'head', heads: 'head',
+    stick: 'stick', sticks: 'stick',
     slice: 'slice', slices: 'slice',
     piece: 'piece', pieces: 'piece',
-    dozen: 'dozen', dozens: 'dozen', doz: 'dozen'
+    dozen: 'dozen', dozens: 'dozen', doz: 'dozen',
+    each: 'each', ea: 'each', unit: 'each', units: 'each'
   };
   return map[s] || s;
 }
@@ -375,9 +378,10 @@ function canonicalUnit(u) {
 function unitFamily_(u) {
   const cu = canonicalUnit(u);
   if (!cu) return { fam: '', base: '' };
-  if (cu === 'tsp' || cu === 'tbsp' || cu === 'cup') return { fam: 'vol', base: 'tsp' };
+  if (cu === 'tsp' || cu === 'tbsp' || cu === 'cup' || cu === 'stick') return { fam: 'vol', base: 'tsp' };
   if (cu === 'ml' || cu === 'l') return { fam: 'ml', base: 'ml' };
   if (cu === 'g' || cu === 'kg' || cu === 'oz' || cu === 'lb') return { fam: 'wt', base: 'g' };
+  if (cu === 'dozen' || cu === 'each') return { fam: 'each', base: 'each' };
   // count-like units (no conversion beyond identity)
   return { fam: 'count', base: cu };
 }
@@ -392,7 +396,8 @@ function toBase_(qty, unit) {
   if (!fam.fam) return { ok: false, qty: null, unit: '' };
 
   if (fam.fam === 'vol') {
-    const mult = (u === 'tsp') ? 1 : (u === 'tbsp') ? 3 : (u === 'cup') ? 48 : null;
+    // 1 stick = 0.5 cup = 24 tsp
+    const mult = (u === 'tsp') ? 1 : (u === 'tbsp') ? 3 : (u === 'cup') ? 48 : (u === 'stick') ? 24 : null;
     if (mult === null) return { ok: false, qty: null, unit: '' };
     return { ok: true, qty: q * mult, unit: 'tsp' };
   }
@@ -405,6 +410,12 @@ function toBase_(qty, unit) {
     const mult = (u === 'g') ? 1 : (u === 'kg') ? 1000 : (u === 'oz') ? 28.349523125 : (u === 'lb') ? 453.59237 : null;
     if (mult === null) return { ok: false, qty: null, unit: '' };
     return { ok: true, qty: q * mult, unit: 'g' };
+  }
+  if (fam.fam === 'each') {
+    // 1 dozen = 12 each
+    const mult = (u === 'each') ? 1 : (u === 'dozen') ? 12 : null;
+    if (mult === null) return { ok: false, qty: null, unit: '' };
+    return { ok: true, qty: q * mult, unit: 'each' };
   }
 
   // count-like
@@ -419,7 +430,8 @@ function fromBase_(baseQty, targetUnit) {
   const fam = unitFamily_(u);
 
   if (fam.fam === 'vol') {
-    const div = (u === 'tsp') ? 1 : (u === 'tbsp') ? 3 : (u === 'cup') ? 48 : null;
+    // 1 stick = 0.5 cup = 24 tsp
+    const div = (u === 'tsp') ? 1 : (u === 'tbsp') ? 3 : (u === 'cup') ? 48 : (u === 'stick') ? 24 : null;
     if (div === null) return { ok: false, qty: null };
     return { ok: true, qty: q / div };
   }
@@ -430,6 +442,12 @@ function fromBase_(baseQty, targetUnit) {
   }
   if (fam.fam === 'wt') {
     const div = (u === 'g') ? 1 : (u === 'kg') ? 1000 : (u === 'oz') ? 28.349523125 : (u === 'lb') ? 453.59237 : null;
+    if (div === null) return { ok: false, qty: null };
+    return { ok: true, qty: q / div };
+  }
+  if (fam.fam === 'each') {
+    // 1 dozen = 12 each
+    const div = (u === 'each') ? 1 : (u === 'dozen') ? 12 : null;
     if (div === null) return { ok: false, qty: null };
     return { ok: true, qty: q / div };
   }
@@ -513,6 +531,12 @@ function pantryQtyFromRow_(row) {
   };
 }
 
+function roundQty_(qty, decimals = 2) {
+  if (qty === null || qty === undefined || isNaN(qty)) return 0;
+  const rounded = Math.round(qty * Math.pow(10, decimals)) / Math.pow(10, decimals);
+  return rounded <= 0.01 ? 0 : rounded;
+}
+
 function _deductFromPantry_(ingredientLower, requiredQty, baseUnit) {
   const ing = normLower_(ingredientLower);
   const needBase = Number(requiredQty);
@@ -523,17 +547,29 @@ function _deductFromPantry_(ingredientLower, requiredQty, baseUnit) {
 
   const hasQtyNum = pantryHasCol_('QtyNum');
   const hasUnit = pantryHasCol_('Unit');
+  const hasExpiration = pantryHasCol_('expiration_date');
 
   // Select only columns that exist in the current DB schema.
   const cols = ['ItemId', 'Name', 'NameLower', 'QtyText'];
   if (hasQtyNum) cols.push('QtyNum');
   if (hasUnit) cols.push('Unit');
+  if (hasExpiration) cols.push('expiration_date');
 
   // Match on NameLower when present, fall back to lower(trim(Name)) for older rows.
+  // FEFO: Order by expiration_date ASC (earliest first), NULL expiration dates last
+  let orderClause = 'ORDER BY COALESCE(NameLower, lower(trim(Name))) ASC, ItemId ASC';
+  if (hasExpiration) {
+    orderClause = `ORDER BY 
+      CASE WHEN expiration_date IS NULL THEN 1 ELSE 0 END ASC,
+      expiration_date ASC,
+      COALESCE(NameLower, lower(trim(Name))) ASC, 
+      ItemId ASC`;
+  }
+
   const rows = db().prepare(
     `SELECT ${cols.join(', ')} FROM pantry
      WHERE (NameLower = ? OR lower(trim(Name)) = ?)
-     ORDER BY COALESCE(NameLower, lower(trim(Name))) ASC, ItemId ASC`
+     ${orderClause}`
   ).all(ing, ing);
 
   if (!rows || !rows.length) {
@@ -545,51 +581,58 @@ function _deductFromPantry_(ingredientLower, requiredQty, baseUnit) {
   let hasUnitMismatch = false;
   let pantryUnits = [];
 
-  for (const r of rows) {
-    if (remainingNeedBase <= 0) break;
+  // Wrap all updates in a transaction for safety
+  const deductTransaction = db().transaction(() => {
+    for (const r of rows) {
+      if (remainingNeedBase <= 0) break;
 
-    const cur = pantryQtyFromRow_(r);
-    if (cur.qtyNum === null || !Number.isFinite(cur.qtyNum) || cur.qtyNum <= 0) continue;
-    if (!cur.unit) continue;
+      const cur = pantryQtyFromRow_(r);
+      if (cur.qtyNum === null || !Number.isFinite(cur.qtyNum) || cur.qtyNum <= 0) continue;
+      if (!cur.unit) continue;
 
-    // Track pantry units for error reporting
-    if (!pantryUnits.includes(cur.unit)) pantryUnits.push(cur.unit);
+      // Track pantry units for error reporting
+      if (!pantryUnits.includes(cur.unit)) pantryUnits.push(cur.unit);
 
-    // Convert pantry row quantity into the ingredient base unit (if compatible).
-    const curBaseResult = convertQty_(cur.qtyNum, cur.unit, bu);
-    if (!curBaseResult.ok) {
-      hasUnitMismatch = true;
-      continue;
+      // Convert pantry row quantity into the ingredient base unit (if compatible).
+      const curBaseResult = convertQty_(cur.qtyNum, cur.unit, bu);
+      if (!curBaseResult.ok) {
+        hasUnitMismatch = true;
+        continue;
+      }
+      const curBase = curBaseResult.qty;
+      if (!Number.isFinite(curBase) || curBase <= 0) continue;
+
+      const takeBase = Math.min(curBase, remainingNeedBase);
+      const leftBase = roundQty_(curBase - takeBase);
+
+      // Write back in the pantry row's own unit when possible (preserves user-entered unit text).
+      const leftInRowUnitResult = convertQty_(leftBase, bu, cur.unit);
+      const leftQtyNum = (leftInRowUnitResult.ok && Number.isFinite(leftInRowUnitResult.qty)) 
+        ? roundQty_(Math.max(0, leftInRowUnitResult.qty)) 
+        : 0;
+
+      const parsed = parseQtyText_(r.QtyText);
+      const displayUnit = (parsed && parsed.unit) ? parsed.unit : (r.Unit || cur.unit || bu);
+
+      const qtyTextOut = displayUnit ? `${Number(leftQtyNum.toFixed(4))} ${displayUnit}`.trim()
+        : `${Number(leftQtyNum.toFixed(4))}`;
+
+      if (hasQtyNum && hasUnit) {
+        // Newer schema supports structured quantity fields.
+        db().prepare(`UPDATE pantry SET QtyNum=?, Unit=?, QtyText=?, UpdatedAt=datetime('now') WHERE ItemId=?`)
+          .run(leftQtyNum, cur.unit, qtyTextOut, r.ItemId);
+      } else {
+        // Legacy schema: only QtyText exists.
+        db().prepare(`UPDATE pantry SET QtyText=?, UpdatedAt=datetime('now') WHERE ItemId=?`)
+          .run(qtyTextOut, r.ItemId);
+      }
+
+      deductedTotalBase += takeBase;
+      remainingNeedBase = roundQty_(remainingNeedBase - takeBase);
     }
-    const curBase = curBaseResult.qty;
-    if (!Number.isFinite(curBase) || curBase <= 0) continue;
+  });
 
-    const takeBase = Math.min(curBase, remainingNeedBase);
-    const leftBase = curBase - takeBase;
-
-    // Write back in the pantry row's own unit when possible (preserves user-entered unit text).
-    const leftInRowUnitResult = convertQty_(leftBase, bu, cur.unit);
-    const leftQtyNum = (leftInRowUnitResult.ok && Number.isFinite(leftInRowUnitResult.qty)) ? Math.max(0, leftInRowUnitResult.qty) : 0;
-
-    const parsed = parseQtyText_(r.QtyText);
-    const displayUnit = (parsed && parsed.unit) ? parsed.unit : (r.Unit || cur.unit || bu);
-
-    const qtyTextOut = displayUnit ? `${Number(leftQtyNum.toFixed(4))} ${displayUnit}`.trim()
-      : `${Number(leftQtyNum.toFixed(4))}`;
-
-    if (hasQtyNum && hasUnit) {
-      // Newer schema supports structured quantity fields.
-      db().prepare(`UPDATE pantry SET QtyNum=?, Unit=?, QtyText=?, UpdatedAt=datetime('now') WHERE ItemId=?`)
-        .run(leftQtyNum, cur.unit, qtyTextOut, r.ItemId);
-    } else {
-      // Legacy schema: only QtyText exists.
-      db().prepare(`UPDATE pantry SET QtyText=?, UpdatedAt=datetime('now') WHERE ItemId=?`)
-        .run(qtyTextOut, r.ItemId);
-    }
-
-    deductedTotalBase += takeBase;
-    remainingNeedBase -= takeBase;
-  }
+  deductTransaction();
 
   // Determine the reason for any remaining undeducted amount
   if (deductedTotalBase === 0 && hasUnitMismatch) {
@@ -600,21 +643,21 @@ function _deductFromPantry_(ingredientLower, requiredQty, baseUnit) {
     };
   } else if (remainingNeedBase > 0 && deductedTotalBase > 0) {
     return {
-      deducted: deductedTotalBase,
+      deducted: roundQty_(deductedTotalBase),
       reason: 'partial',
-      details: `Only ${deductedTotalBase} ${bu} available in pantry`
+      details: `Only ${roundQty_(deductedTotalBase)} ${bu} available in pantry`
     };
   } else if (deductedTotalBase === 0) {
     return { deducted: 0, reason: 'insufficient' };
   }
 
-  return { deducted: deductedTotalBase, reason: 'success' };
+  return { deducted: roundQty_(deductedTotalBase), reason: 'success' };
 }
 
 
 function _addBackToPantry_(ingredientLower, addQty, baseUnit) {
   const ing = normLower_(ingredientLower);
-  const addBase = Number(addQty);
+  const addBase = roundQty_(Number(addQty));
   const bu = canonicalUnit(baseUnit);
   if (!ing || !Number.isFinite(addBase) || addBase <= 0 || !bu) {
     return;
@@ -622,10 +665,12 @@ function _addBackToPantry_(ingredientLower, addQty, baseUnit) {
 
   const hasQtyNum = pantryHasCol_('QtyNum');
   const hasUnit = pantryHasCol_('Unit');
+  const hasCategory = pantryHasCol_('Category');
 
   const cols = ['ItemId', 'Name', 'NameLower', 'QtyText', 'StoreId', 'Notes'];
   if (hasQtyNum) cols.push('QtyNum');
   if (hasUnit) cols.push('Unit');
+  if (hasCategory) cols.push('Category');
 
   const rows = db().prepare(
     `SELECT ${cols.join(', ')} FROM pantry
@@ -633,59 +678,72 @@ function _addBackToPantry_(ingredientLower, addQty, baseUnit) {
      ORDER BY COALESCE(NameLower, lower(trim(Name))) ASC, ItemId ASC`
   ).all(ing, ing);
 
-  const fmt = (n) => Number(Number(n).toFixed(4));
+  // Wrap in transaction for safety
+  const addBackTransaction = db().transaction(() => {
+    if (rows && rows.length) {
+      // Add back into the first matching pantry row (consistent with deduction ordering).
+      const r = rows[0];
+      const cur = pantryQtyFromRow_(r);
 
-  if (rows && rows.length) {
-    // Add back into the first matching pantry row (consistent with deduction ordering).
-    const r = rows[0];
-    const cur = pantryQtyFromRow_(r);
+      // If unit missing, treat add-back as the base unit and write it into QtyText.
+      const rowUnit = cur.unit || bu;
+      let curBase = 0;
+      if (cur.qtyNum !== null && Number.isFinite(cur.qtyNum) && cur.qtyNum > 0) {
+        const curBaseResult = convertQty_(cur.qtyNum, rowUnit, bu);
+        curBase = (curBaseResult.ok && Number.isFinite(curBaseResult.qty)) ? curBaseResult.qty : 0;
+      }
 
-    // If unit missing, treat add-back as the base unit and write it into QtyText.
-    const rowUnit = cur.unit || bu;
-    let curBase = 0;
-    if (cur.qtyNum !== null && Number.isFinite(cur.qtyNum) && cur.qtyNum > 0) {
-      const curBaseResult = convertQty_(cur.qtyNum, rowUnit, bu);
-      curBase = (curBaseResult.ok && Number.isFinite(curBaseResult.qty)) ? curBaseResult.qty : 0;
+      const newBase = roundQty_(curBase + addBase);
+      const newInRowUnitResult = convertQty_(newBase, bu, rowUnit);
+      const newQtyNum = (newInRowUnitResult.ok && Number.isFinite(newInRowUnitResult.qty)) 
+        ? roundQty_(newInRowUnitResult.qty) 
+        : roundQty_(addBase);
+
+      const parsed = parseQtyText_(r.QtyText);
+      const displayUnit = (parsed && parsed.unit) ? parsed.unit : (r.Unit || rowUnit || bu);
+      const qtyTextOut = displayUnit ? `${newQtyNum} ${displayUnit}`.trim() : `${newQtyNum}`;
+
+      if (hasQtyNum && hasUnit) {
+        db().prepare(`UPDATE pantry SET QtyNum=?, Unit=?, QtyText=?, UpdatedAt=datetime('now') WHERE ItemId=?`)
+          .run(newQtyNum, rowUnit, qtyTextOut, r.ItemId);
+      } else {
+        db().prepare(`UPDATE pantry SET QtyText=?, UpdatedAt=datetime('now') WHERE ItemId=?`)
+          .run(qtyTextOut, r.ItemId);
+      }
+      return;
     }
 
-    const newBase = curBase + addBase;
-    const newInRowUnitResult = convertQty_(newBase, bu, rowUnit);
-    const newQtyNum = (newInRowUnitResult.ok && Number.isFinite(newInRowUnitResult.qty)) ? fmt(newInRowUnitResult.qty) : fmt(addBase);
+    // No existing pantry row: create a new one (legacy-safe).
+    const itemId = uuidShort_('pan');
+    const displayName = String(ingredientLower || '').trim() || ing;
 
-    const parsed = parseQtyText_(r.QtyText);
-    const displayUnit = (parsed && parsed.unit) ? parsed.unit : (r.Unit || rowUnit || bu);
-    const qtyTextOut = displayUnit ? `${newQtyNum} ${displayUnit}`.trim() : `${newQtyNum}`;
+    // Auto-assign category using the classification system
+    const category = classifyIngredientInternal_(ing);
 
-    if (hasQtyNum && hasUnit) {
-      db().prepare(`UPDATE pantry SET QtyNum=?, Unit=?, QtyText=?, UpdatedAt=datetime('now') WHERE ItemId=?`)
-        .run(newQtyNum, rowUnit, qtyTextOut, r.ItemId);
+    // Convert to display format
+    const displayQtyResult = convertQty_(addBase, bu, bu);
+    const displayQty = (displayQtyResult.ok && Number.isFinite(displayQtyResult.qty)) ? displayQtyResult.qty : addBase;
+    const qtyTextOut = `${roundQty_(displayQty)} ${bu}`.trim();
+
+    if (hasQtyNum && hasUnit && hasCategory) {
+      db().prepare(`
+        INSERT INTO pantry(ItemId, Name, NameLower, QtyText, QtyNum, Unit, Category, StoreId, Notes, UpdatedAt)
+        VALUES(?,?,?,?,?,?,?,?,?,datetime('now'))
+      `).run(itemId, displayName, ing, qtyTextOut, roundQty_(addBase), bu, category, '', '');
+    } else if (hasQtyNum && hasUnit) {
+      db().prepare(`
+        INSERT INTO pantry(ItemId, Name, NameLower, QtyText, QtyNum, Unit, StoreId, Notes, UpdatedAt)
+        VALUES(?,?,?,?,?,?,?,?,datetime('now'))
+      `).run(itemId, displayName, ing, qtyTextOut, roundQty_(addBase), bu, '', '');
     } else {
-      db().prepare(`UPDATE pantry SET QtyText=?, UpdatedAt=datetime('now') WHERE ItemId=?`)
-        .run(qtyTextOut, r.ItemId);
+      db().prepare(`
+        INSERT INTO pantry(ItemId, Name, NameLower, QtyText, StoreId, Notes, UpdatedAt)
+        VALUES(?,?,?,?,?,?,datetime('now'))
+      `).run(itemId, displayName, ing, qtyTextOut, '', '');
     }
-    return;
-  }
+  });
 
-  // No existing pantry row: create a new one (legacy-safe).
-  const itemId = uuidShort_('pan');
-  const displayName = String(ingredientLower || '').trim() || ing;
-
-  // Convert to display format
-  const displayQtyResult = convertQty_(addBase, bu, bu);
-  const displayQty = (displayQtyResult.ok && Number.isFinite(displayQtyResult.qty)) ? displayQtyResult.qty : addBase;
-  const qtyTextOut = `${fmt(displayQty)} ${bu}`.trim();
-
-  if (hasQtyNum && hasUnit) {
-    db().prepare(`
-      INSERT INTO pantry(ItemId, Name, NameLower, QtyText, QtyNum, Unit, StoreId, Notes, UpdatedAt)
-      VALUES(?,?,?,?,?,?,?,?,datetime('now'))
-    `).run(itemId, displayName, ing, qtyTextOut, fmt(addBase), bu, '', '');
-  } else {
-    db().prepare(`
-      INSERT INTO pantry(ItemId, Name, NameLower, QtyText, StoreId, Notes, UpdatedAt)
-      VALUES(?,?,?,?,?,?,datetime('now'))
-    `).run(itemId, displayName, ing, qtyTextOut, '', '');
-  }
+  addBackTransaction();
 }
 
 
@@ -707,6 +765,15 @@ function pantryCols_() {
 }
 function pantryHasCol_(name) {
   return pantryCols_().has(name);
+}
+
+function tableHasCol_(tableName, colName) {
+  try {
+    const cols = db().prepare(`PRAGMA table_info(${tableName})`).all();
+    return cols.some(c => c.name === colName);
+  } catch (e) {
+    return false;
+  }
 }
 
 function ymd_(d) {
@@ -854,6 +921,7 @@ async function handleApiCall({ fn, payload, store }) {
       case 'getRecipeSuggestionsFromPantry': return getRecipeSuggestionsFromPantry(payload);
       case 'importRecipeFromUrl': return importRecipeFromUrl(payload);
       case 'recategorizeAllRecipes': return recategorizeAllRecipes();
+      case 'recategorizeAllIngredients': return recategorizeAllIngredients();
 
       case 'getPlansRange': return getPlansRange(payload);
       case 'upsertPlanMeal': return upsertPlanMeal(payload);
@@ -920,6 +988,7 @@ async function handleApiCall({ fn, payload, store }) {
       case 'setIngredientCategories': return setIngredientCategories(payload);
       case 'classifyIngredient': return classifyIngredient(payload);
       case 'trainIngredientCategory': return trainIngredientCategory(payload);
+      case 'getExpiredPantryItems': return getExpiredPantryItems();
       case 'autoAssignCuisines': return autoAssignCuisines(payload);
       case 'listUniqueCuisines': return listUniqueCuisines(payload);
       case 'manageCuisine': return manageCuisine(payload);
@@ -1256,7 +1325,11 @@ async function upsertRecipeWithIngredients(payload) {
     cleaned.forEach((x, i) => {
       const norm = x.IngredientNorm || normLower_(x.IngredientRaw);
       const name = x.IngredientName || x.IngredientRaw;
-      ins.run(recipeId, i, norm, x.IngredientRaw, name, x.Notes, x.QtyNum, x.QtyText, x.StoreId, x.Unit, x.Category);
+      let category = x.Category;
+      if (!category || category === 'Other') {
+        category = classifyIngredientInternal_(norm || name);
+      }
+      ins.run(recipeId, i, norm, x.IngredientRaw, name, x.Notes, x.QtyNum, x.QtyText, x.StoreId, x.Unit, category);
     });
   });
   tx();
@@ -1645,6 +1718,58 @@ function recategorizeAllRecipes() {
   } catch (err) {
     console.error('[recategorizeAllRecipes] Error:', err);
     return err_(err.message || 'Failed to recategorize recipes');
+  }
+}
+
+function recategorizeAllIngredients() {
+  try {
+    const ingredients = db().prepare(`
+      SELECT rowid, RecipeId, IngredientNorm, IngredientRaw, IngredientName, Category 
+      FROM ingredients 
+      WHERE Category IS NULL OR Category = '' OR Category = 'Other'
+    `).all();
+    
+    if (!ingredients || ingredients.length === 0) {
+      return ok_({ total: 0, updated: 0, message: 'All ingredients already categorized' });
+    }
+
+    console.log(`[recategorizeAllIngredients] Processing ${ingredients.length} ingredients...`);
+
+    const updateStmt = db().prepare(`
+      UPDATE ingredients SET Category = ? WHERE rowid = ?
+    `);
+
+    let updated = 0;
+    const categoryCounts = {};
+
+    const runUpdates = db().transaction(() => {
+      for (const ing of ingredients) {
+        const nameToClassify = ing.IngredientNorm || ing.IngredientName || ing.IngredientRaw || '';
+        if (!nameToClassify) continue;
+
+        const category = classifyIngredientInternal_(nameToClassify);
+        if (category && category !== 'Other') {
+          updateStmt.run(category, ing.rowid);
+          updated++;
+          categoryCounts[category] = (categoryCounts[category] || 0) + 1;
+        }
+      }
+    });
+
+    runUpdates();
+
+    console.log(`[recategorizeAllIngredients] Updated ${updated} ingredients`);
+    console.log('[recategorizeAllIngredients] Category counts:', categoryCounts);
+
+    return ok_({
+      total: ingredients.length,
+      updated,
+      unchanged: ingredients.length - updated,
+      categoryCounts
+    });
+  } catch (err) {
+    console.error('[recategorizeAllIngredients] Error:', err);
+    return err_(err.message || 'Failed to recategorize ingredients');
   }
 }
 
@@ -2550,6 +2675,7 @@ function buildShoppingList(payload) {
   const start = String(payload && payload.start || '').trim();
   const end = String(payload && payload.end || '').trim();
   let userId = String(payload && payload.userId || '').trim();
+  const includeLowStock = Boolean(payload && payload.includeLowStock);
 
   if (!start || !end) return err_('start and end date required.');
 
@@ -2929,6 +3055,65 @@ function buildShoppingList(payload) {
     }
   }
 
+  // Add low stock pantry items to shopping list if requested
+  if (includeLowStock && hasQtyNum && hasLowStockThreshold) {
+    try {
+      const lowStockRows = db().prepare(`
+        SELECT ItemId, Name, QtyNum, low_stock_threshold, Unit, StoreId, Category
+        FROM pantry
+        WHERE low_stock_threshold IS NOT NULL 
+          AND low_stock_threshold > 0
+          AND QtyNum IS NOT NULL 
+          AND QtyNum <= low_stock_threshold
+        ORDER BY Name ASC
+      `).all();
+
+      console.log('[buildShoppingList] Found', lowStockRows.length, 'low stock pantry items to add');
+
+      for (const row of lowStockRows) {
+        const storeId = row.StoreId || 'unassigned';
+        const qtyNeeded = Math.max(1, (row.low_stock_threshold || 1) - (row.QtyNum || 0));
+        
+        // Find or create group for this store
+        let group = groups.find(g => g.StoreId === storeId);
+        if (!group) {
+          group = {
+            StoreId: storeId,
+            StoreName: '',
+            Items: []
+          };
+          groups.push(group);
+        }
+
+        // Check if item already exists in this group (to avoid duplicates)
+        const existingItem = group.Items.find(item => 
+          (item.IngredientNorm || '').toLowerCase() === (row.Name || '').toLowerCase()
+        );
+
+        if (!existingItem) {
+          group.Items.push({
+            IngredientNorm: row.Name,
+            DisplayTitle: row.Name,
+            TotalQty: qtyNeeded,
+            Unit: row.Unit || '',
+            Category: row.Category || 'Other',
+            SourceRecipes: [],
+            Sources: [],
+            OriginalNames: [row.Name],
+            isPantryLowStock: true
+          });
+        }
+      }
+
+      // Re-sort items within groups by category
+      for (const group of groups) {
+        group.Items.sort((a, b) => (a.Category || 'zzz').localeCompare(b.Category || 'zzz'));
+      }
+    } catch (e) {
+      console.log('[buildShoppingList] Error adding low stock items:', e.message);
+    }
+  }
+
   return ok_({
     groups,
     pantryDeductions,
@@ -3188,7 +3373,10 @@ function upsertPantryItem(payload) {
   const qtyText = String(payload && (payload.qtyText || payload.QtyText) || '').trim();
   const storeId = String(payload && (payload.storeId || payload.StoreId) || '').trim();
   const notes = String(payload && (payload.notes || payload.Notes) || '');
-  const category = String(payload && (payload.category || payload.Category) || '').trim();
+  let category = String(payload && (payload.category || payload.Category) || '').trim();
+  if (!category || category === 'Other') {
+    category = classifyIngredientInternal_(nameLower || name);
+  }
 
   const hasQtyNum = pantryHasCol_('QtyNum');
   const hasUnit = pantryHasCol_('Unit');
@@ -4012,26 +4200,155 @@ function getIngredientCategories() {
   return ok_({ categories });
 }
 
+function extractSignificantWords_(ingredientName) {
+  const stopWords = ['a', 'an', 'the', 'of', 'for', 'with', 'and', 'or', 'to', 'in', 'fresh', 'dried', 'chopped', 'sliced', 'diced', 'minced', 'ground', 'whole', 'large', 'small', 'medium'];
+  return (ingredientName || '')
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !stopWords.includes(w));
+}
+
+function classifyIngredientInternal_(ingredientName) {
+  const normalized = normLower_(ingredientName);
+  if (!normalized) return 'Other';
+  
+  try {
+    // 1. Check user_ingredient_category for exact match (learned preference)
+    const hasUserTable = tableHasCol_('user_ingredient_category', 'name_lower');
+    if (hasUserTable) {
+      const exactMatch = db().prepare(`
+        SELECT category FROM user_ingredient_category WHERE name_lower = ?
+      `).get(normalized);
+      if (exactMatch && exactMatch.category) return exactMatch.category;
+      
+      // 2. Partial match - check if any significant word matches a learned category
+      const words = extractSignificantWords_(normalized);
+      for (const word of words) {
+        const partialMatch = db().prepare(`
+          SELECT category FROM user_ingredient_category 
+          WHERE name_lower = ? 
+             OR name_lower LIKE ? || ' %' 
+             OR name_lower LIKE '% ' || ?
+             OR name_lower LIKE '% ' || ? || ' %'
+          LIMIT 1
+        `).get(word, word, word, word);
+        if (partialMatch && partialMatch.category) return partialMatch.category;
+      }
+    }
+    
+    // 3. Check category_overrides for keyword match
+    const override = db().prepare("SELECT category FROM category_overrides WHERE keyword=?").get(normalized);
+    if (override && override.category) return override.category;
+    
+    // 4. Check existing ingredients table for same ingredient
+    const existing = db().prepare(`
+      SELECT Category FROM ingredients 
+      WHERE lower(IngredientNorm)=? AND Category IS NOT NULL AND Category != '' AND Category != 'Other'
+      LIMIT 1
+    `).get(normalized);
+    if (existing && existing.Category) return existing.Category;
+    
+    // 5. Partial match against ingredients table
+    const words2 = extractSignificantWords_(normalized);
+    for (const word of words2) {
+      const partialExisting = db().prepare(`
+        SELECT Category FROM ingredients 
+        WHERE (lower(IngredientNorm) = ? OR lower(IngredientNorm) LIKE ? || ' %' OR lower(IngredientNorm) LIKE '% ' || ?)
+          AND Category IS NOT NULL AND Category != '' AND Category != 'Other'
+        LIMIT 1
+      `).get(word, word, word);
+      if (partialExisting && partialExisting.Category) return partialExisting.Category;
+    }
+  } catch (e) {
+    console.log('[classifyIngredientInternal_] Error:', e.message);
+  }
+  
+  // 6. Default to 'Other'
+  return 'Other';
+}
+
+function learnIngredientCategory_(ingredientName, category) {
+  const normalized = normLower_(ingredientName);
+  if (!normalized || !category) return;
+  
+  try {
+    const hasUserTable = tableHasCol_('user_ingredient_category', 'name_lower');
+    if (hasUserTable) {
+      db().prepare(`
+        INSERT INTO user_ingredient_category (name, name_lower, category, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(name_lower) DO UPDATE SET 
+          category = excluded.category,
+          updated_at = datetime('now')
+      `).run(ingredientName, normalized, category);
+    }
+  } catch (e) {
+    console.log('[learnIngredientCategory_] Error:', e.message);
+  }
+}
+
+function propagateIngredientCategory_(ingredientName, category) {
+  const normalized = normLower_(ingredientName);
+  if (!normalized || !category) return { updated: 0 };
+  
+  try {
+    const result = db().prepare(`
+      UPDATE ingredients 
+      SET Category = ?, UpdatedAt = datetime('now')
+      WHERE lower(IngredientNorm) = ? AND (Category IS NULL OR Category = '' OR Category = 'Other')
+    `).run(category, normalized);
+    
+    return { updated: result.changes };
+  } catch (e) {
+    console.log('[propagateIngredientCategory_] Error:', e.message);
+    return { updated: 0 };
+  }
+}
+
 function setIngredientCategories(payload) {
   const ingredientNorm = normLower_((payload && payload.ingredientNorm) || '');
   const category = String(payload && payload.category || '').trim();
   if (!ingredientNorm) return err_('ingredientNorm required.');
 
+  // Update the specific ingredients
   db().prepare("UPDATE ingredients SET Category=? WHERE lower(IngredientNorm)=?").run(category, ingredientNorm);
-  return ok_({});
+  
+  // Learn from this choice
+  learnIngredientCategory_(ingredientNorm, category);
+  
+  // Propagate to all matching ingredients
+  const propagated = propagateIngredientCategory_(ingredientNorm, category);
+  
+  return ok_({ propagatedCount: propagated.updated });
 }
 
 function classifyIngredient(payload) {
   const ingredientNorm = normLower_((payload && payload.ingredientNorm) || '');
   if (!ingredientNorm) return err_('ingredientNorm required.');
 
-  const override = db().prepare("SELECT category FROM category_overrides WHERE keyword=?").get(ingredientNorm);
-  if (override) return ok_({ category: override.category, source: 'override' });
+  const category = classifyIngredientInternal_(ingredientNorm);
+  
+  // Determine source for debugging/transparency
+  let source = 'default';
+  try {
+    const hasUserTable = tableHasCol_('user_ingredient_category', 'name_lower');
+    if (hasUserTable) {
+      const userMatch = db().prepare("SELECT category FROM user_ingredient_category WHERE name_lower = ?").get(ingredientNorm);
+      if (userMatch) source = 'learned';
+    }
+    if (source === 'default') {
+      const override = db().prepare("SELECT category FROM category_overrides WHERE keyword=?").get(ingredientNorm);
+      if (override) source = 'override';
+    }
+    if (source === 'default') {
+      const existing = db().prepare("SELECT Category FROM ingredients WHERE lower(IngredientNorm)=? AND Category IS NOT NULL AND Category != '' LIMIT 1").get(ingredientNorm);
+      if (existing) source = 'existing';
+    }
+  } catch (e) {
+    // Ignore errors in source detection
+  }
 
-  const existing = db().prepare("SELECT Category FROM ingredients WHERE lower(IngredientNorm)=? AND Category IS NOT NULL AND Category != '' LIMIT 1").get(ingredientNorm);
-  if (existing) return ok_({ category: existing.Category, source: 'existing' });
-
-  return ok_({ category: 'Other', source: 'default' });
+  return ok_({ category, source });
 }
 
 function trainIngredientCategory(payload) {
@@ -4039,8 +4356,39 @@ function trainIngredientCategory(payload) {
   const category = String(payload && payload.category || '').trim();
   if (!ingredientNorm || !category) return err_('ingredientNorm and category required.');
 
+  // Update all matching ingredients
   db().prepare("UPDATE ingredients SET Category=? WHERE lower(IngredientNorm)=?").run(category, ingredientNorm);
-  return ok_({});
+  
+  // Learn from this choice
+  learnIngredientCategory_(ingredientNorm, category);
+  
+  // Propagate to any that were missed (e.g., had different capitalization in IngredientNorm)
+  const propagated = propagateIngredientCategory_(ingredientNorm, category);
+  
+  return ok_({ propagatedCount: propagated.updated });
+}
+
+function getExpiredPantryItems() {
+  try {
+    const hasExpiration = pantryHasCol_('expiration_date');
+    if (!hasExpiration) {
+      return ok_({ expiredItems: [], count: 0 });
+    }
+    
+    const rows = db().prepare(`
+      SELECT ItemId, Name, QtyNum, Unit, expiration_date, Category
+      FROM pantry
+      WHERE expiration_date IS NOT NULL 
+        AND date(expiration_date) < date('now')
+        AND QtyNum > 0
+      ORDER BY expiration_date ASC
+    `).all();
+    
+    return ok_({ expiredItems: rows, count: rows.length });
+  } catch (e) {
+    console.log('[getExpiredPantryItems] Error:', e.message);
+    return ok_({ expiredItems: [], count: 0 });
+  }
 }
 
 // ================= ADDITIONAL ITEMS API (NEW) =================
